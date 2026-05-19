@@ -125,6 +125,53 @@ class LangChainRagAdapter(LangChainRagPort):
                 "No LLM API keys configured (GEMINI_API_KEY or OPENAI_API_KEY required)."
             )
 
+    def _get_callbacks(self) -> list[Any]:
+        import os
+
+        callbacks = []
+        if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
+            try:
+                from langfuse.callback import CallbackHandler
+
+                langfuse_handler = CallbackHandler(
+                    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+                    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+                    host=os.getenv("LANGFUSE_HOST", "http://localhost:3000"),
+                )
+                callbacks.append(langfuse_handler)
+            except ImportError:
+                pass
+        return callbacks
+
+    def _extract_sources(self, intermediate_steps: list[Any]) -> list[dict[str, Any]]:
+        sources = []
+        for action, observation in intermediate_steps:
+            if action.tool == "search_documents_tool" and isinstance(observation, list):
+                for chunk in observation:
+                    sources.append(chunk)
+            elif action.tool == "query_database_tool":
+                sources.append(
+                    {
+                        "text": f"SQL Query executed: {action.tool_input.get('sql_query', '')}\nResult: {observation}",
+                        "document_id": "Database",
+                        "page_number": "N/A",
+                    }
+                )
+        return sources
+
+    def _clean_output(self, ans: Any) -> str:
+        if isinstance(ans, list):
+            text_parts = []
+            for part in ans:
+                if isinstance(part, dict) and "text" in part:
+                    text_parts.append(part["text"])
+                elif isinstance(part, str):
+                    text_parts.append(part)
+            return "\n".join(text_parts)
+        if isinstance(ans, dict) and "text" in ans:
+            return str(ans["text"])
+        return str(ans)
+
     async def ask_rag_question(self, question: str) -> dict[str, Any]:
         llm = self._get_llm()
         tools = [search_documents_tool, query_database_tool]
@@ -151,53 +198,13 @@ class LangChainRagAdapter(LangChainRagPort):
             agent=agent, tools=tools, verbose=True, return_intermediate_steps=True
         )
 
-        # Optional Langfuse callback handler for self-hosted LLM tracing
-        import os
-
-        callbacks = []
-        if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
-            try:
-                from langfuse.callback import CallbackHandler
-
-                langfuse_handler = CallbackHandler(
-                    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
-                    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
-                    host=os.getenv("LANGFUSE_HOST", "http://localhost:3000"),
-                )
-                callbacks.append(langfuse_handler)
-            except ImportError:
-                pass
-
+        callbacks = self._get_callbacks()
         response = await agent_executor.ainvoke(
             {"input": question}, config={"callbacks": callbacks}
         )
 
-        # Extract sources from intermediate steps
-        sources = []
-        for action, observation in response.get("intermediate_steps", []):
-            if action.tool == "search_documents_tool" and isinstance(observation, list):
-                for chunk in observation:
-                    sources.append(chunk)
-            elif action.tool == "query_database_tool":
-                sources.append(
-                    {
-                        "text": f"SQL Query executed: {action.tool_input.get('sql_query', '')}\\nResult: {observation}",
-                        "document_id": "Database",
-                        "page_number": "N/A",
-                    }
-                )
-
-        ans = response.get("output", "")
-        if isinstance(ans, list):
-            text_parts = []
-            for part in ans:
-                if isinstance(part, dict) and "text" in part:
-                    text_parts.append(part["text"])
-                elif isinstance(part, str):
-                    text_parts.append(part)
-            ans = "\n".join(text_parts)
-        elif isinstance(ans, dict) and "text" in ans:
-            ans = ans["text"]
+        sources = self._extract_sources(response.get("intermediate_steps", []))
+        ans = self._clean_output(response.get("output", ""))
 
         return {"answer": ans, "sources": sources}
 

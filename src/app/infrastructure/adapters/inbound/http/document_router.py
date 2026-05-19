@@ -34,14 +34,21 @@ class DbQueryRequest(BaseModel):
     query: str
 
 
-@router.post("/documents/upload")
+@router.post(
+    "/documents/upload",
+    responses={
+        400: {"description": "Invalid file format"},
+        413: {"description": "File size limit exceeded"},
+        500: {"description": "Internal server error"},
+    },
+)
 @inject
 async def upload_documents(
     files: Annotated[list[UploadFile], File()],
-    process_use_case: ProcessDocumentsUseCase = Depends(
-        Provide[Container.process_documents_use_case]
-    ),
-    session: AsyncSession = Depends(get_db_session),
+    process_use_case: Annotated[
+        ProcessDocumentsUseCase, Depends(Provide[Container.process_documents_use_case])
+    ],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> dict[str, Any]:
     """
     Upload multiple PDF documents for extraction.
@@ -68,8 +75,13 @@ async def upload_documents(
         file_tuples.append((f.filename, content))
 
         # Save to local disk for HITL viewing
-        with open(f"data/uploads/{f.filename}", "wb") as out_file:
-            out_file.write(content)
+        import asyncio
+
+        def save_file(name: str, data: bytes) -> None:
+            with open(f"data/uploads/{name}", "wb") as out_file:
+                out_file.write(data)
+
+        await asyncio.to_thread(save_file, f.filename or "unknown.pdf", content)
 
     repository = PostgresDocumentRepository(session)
 
@@ -127,9 +139,9 @@ async def upload_documents(
 
 @router.get("/documents")
 async def list_documents(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
     limit: int = 10,
     offset: int = 0,
-    session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """
     Retrieve stored canonical document metadata from Postgres.
@@ -183,11 +195,18 @@ async def list_documents(
     return success(res)
 
 
-@router.post("/documents/chat")
+@router.post(
+    "/documents/chat",
+    responses={
+        500: {"description": "Internal server error"},
+    },
+)
 @inject
 async def chat_documents(
     request: ChatRequest,
-    chat_use_case: ChatRagUseCase = Depends(Provide[Container.chat_rag_use_case]),
+    chat_use_case: Annotated[
+        ChatRagUseCase, Depends(Provide[Container.chat_rag_use_case])
+    ],
 ) -> dict[str, Any]:
     """
     Perform conversational RAG query over document chunks stored in Qdrant.
@@ -201,13 +220,18 @@ async def chat_documents(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/documents/query-db")
+@router.post(
+    "/documents/query-db",
+    responses={
+        500: {"description": "Internal server error"},
+    },
+)
 @inject
 async def query_db(
     request: DbQueryRequest,
-    query_use_case: QueryDatabaseUseCase = Depends(
-        Provide[Container.query_database_use_case]
-    ),
+    query_use_case: Annotated[
+        QueryDatabaseUseCase, Depends(Provide[Container.query_database_use_case])
+    ],
 ) -> dict[str, Any]:
     """
     Query the structured document metadata table in Postgres using natural language.
@@ -219,10 +243,16 @@ async def query_db(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.get("/documents/{document_id}/pdf")
+@router.get(
+    "/documents/{document_id}/pdf",
+    responses={
+        400: {"description": "Invalid UUID format"},
+        404: {"description": "Document or PDF not found"},
+    },
+)
 async def get_document_pdf(
     document_id: str,
-    session: AsyncSession = Depends(get_db_session),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> FileResponse:
     from uuid import UUID
 
@@ -248,11 +278,17 @@ async def get_document_pdf(
     )
 
 
-@router.patch("/documents/{document_id}")
+@router.patch(
+    "/documents/{document_id}",
+    responses={
+        400: {"description": "Invalid UUID format"},
+        404: {"description": "Document not found"},
+    },
+)
 async def update_document(
     document_id: str,
     updates: dict[str, Any],
-    session: AsyncSession = Depends(get_db_session),
+    session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> dict[str, Any]:
     from uuid import UUID
 

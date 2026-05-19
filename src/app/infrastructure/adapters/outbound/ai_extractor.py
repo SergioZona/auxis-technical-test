@@ -123,29 +123,35 @@ class LlmAiExtractor(AiExtractorPort):
                 raw = raw[4:]
         return raw.strip()
 
+    def _coerce_float(self, val: Any) -> float | None:
+        if val is None:
+            return None
+        try:
+            return float(val)
+        except ValueError, TypeError:
+            return None
+
+    def _coerce_int(self, val: Any) -> int | None:
+        if val is None:
+            return None
+        try:
+            return int(val)
+        except ValueError, TypeError:
+            return None
+
     def _coerce_types(self, result: dict[str, Any]) -> dict[str, Any]:
         """Ensure numeric fields are correct Python types, not strings."""
-        float_top = ["total_gross_income", "income_tax_withheld"]
-        for f in float_top:
-            if result.get(f) is not None:
-                try:
-                    result[f] = float(result[f])
-                except ValueError, TypeError:
-                    result[f] = None
+        for f in ["total_gross_income", "income_tax_withheld"]:
+            if f in result:
+                result[f] = self._coerce_float(result[f])
 
-        if result.get("tax_year") is not None:
-            try:
-                result["tax_year"] = int(result["tax_year"])
-            except ValueError, TypeError:
-                result["tax_year"] = None
+        if "tax_year" in result:
+            result["tax_year"] = self._coerce_int(result["tax_year"])
 
         extras = result.get("extras") or {}
         for f in _FLOAT_EXTRAS:
-            if extras.get(f) is not None:
-                try:
-                    extras[f] = float(extras[f])
-                except ValueError, TypeError:
-                    extras[f] = None
+            if f in extras:
+                extras[f] = self._coerce_float(extras[f])
         result["extras"] = extras
         return result
 
