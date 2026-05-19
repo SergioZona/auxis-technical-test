@@ -1,159 +1,223 @@
-# Hexagonal Backend Template
+# 🧾 Tax Document Extraction API
 
-> A production-ready Python **Hexagonal Architecture (Ports & Adapters)** template.
-> Engineered with **FastAPI**, **UV** package manager, **SQLAlchemy 2.0 (async)**, and robust remote and local CI/CD pipelines.
+A production-ready backend that accepts PDF tax documents, extracts structured data using a **text + OCR preprocessing pipeline**, stores canonical metadata in **PostgreSQL**, and persists vector embeddings in **Qdrant** for semantic search. Built with **FastAPI** following **Hexagonal Architecture** (Ports & Adapters).
 
 ---
 
-## 🏗️ Repository Architecture & Directory Structure
+## 📐 Architecture
 
-This project follows strict **Hexagonal Architecture** (Domain-Centric) principles. Sub-domain components are isolated, and dependencies only flow inward.
+### C4 Component Diagram
+
+```mermaid
+C4Component
+    title Tax Document Extraction API — C4 Component Diagram
+
+    Container_Boundary(api, "FastAPI Application") {
+        Component(health_router, "Health Router", "FastAPI Router", "Liveness, readiness, and ping probes")
+        Component(document_router, "Document Router", "FastAPI Router", "POST /documents/upload, GET /documents")
+        Component(item_router, "Item Router", "FastAPI Router", "CRUD items (template example)")
+
+        Component(process_uc, "ProcessDocuments UseCase", "Python Class", "Orchestrates: parse → save → embed. Runs files concurrently via asyncio.gather")
+        Component(parser, "PyMuPDFDocumentParser", "Outbound Adapter", "Extracts text from PDFs. Falls back to pytesseract OCR for scanned docs. Maps to Canonical schema. Unknown fields → metadata_others")
+        Component(doc_repo, "PostgresDocumentRepository", "Outbound Adapter (SQLAlchemy)", "Stores canonical document metadata in PostgreSQL")
+        Component(vector_repo, "QdrantVectorRepository", "Outbound Adapter (FastEmbed)", "Embeds text chunks using BAAI/bge-small-en-v1.5. Stores in Qdrant")
+        Component(container, "DI Container", "dependency-injector", "Composition root. Wires all adapters to ports and use cases")
+        Component(settings, "Settings", "pydantic-settings", "Typed config loaded from src/env/*.env files")
+    }
+
+    ContainerDb(postgres, "PostgreSQL 17", "Relational Database", "Stores: filename, canonical fields (invoice_number, date, total_tax, vendor), metadata_others (JSONB)")
+    ContainerDb(qdrant, "Qdrant", "Vector Database", "Stores: text chunks + 384-dim embeddings (BAAI/bge-small-en-v1.5)")
+
+    Rel(document_router, process_uc, "Invokes")
+    Rel(process_uc, parser, "Uses (DocumentParserPort)")
+    Rel(process_uc, doc_repo, "Uses (DocumentRepositoryPort)")
+    Rel(process_uc, vector_repo, "Uses (VectorPort)")
+    Rel(doc_repo, postgres, "Reads/Writes")
+    Rel(vector_repo, qdrant, "Reads/Writes")
+    Rel(container, process_uc, "Wires parser + vector_repo")
+    Rel(container, settings, "Reads config")
+```
+
+---
+
+## 🔄 Preprocessing Pipeline
 
 ```
-hexagonal_backend_template/
-├── .agents/                    # AI agent guidelines, rules, and skills
-├── docker/                     # Docker Compose utility stacks
-│   ├── docker-compose.local.yml  # Local developer dependencies (PostgreSQL)
-│   └── docker-compose.sonar.yml  # Local SonarQube quality gate instance
-├── docs/                       # Project documentation single source of truth
-│   ├── CONSTITUTION.md         # Repository principles and strict rules
-│   ├── getting_started.md      # Detailed developer setup instructions
-│   └── LOCAL_CI_GUIDE.md       # Pre-push security and linting checks
-├── src/
-│   ├── env/                    # Configuration and Environment variable files
-│   └── app/
-│       ├── domain/             # Core business models, exceptions, and logic
-│       ├── application/        # Inbound and Outbound Ports (ABCs) + Use Cases
-│       └── infrastructure/     # Adapters (HTTP, Persistence) + DI wiring
-└── tests/                      # Core test suites (Unit, Integration, Architecture, Contract)
+PDF Upload
+    │
+    ▼
+┌───────────────────────┐
+│  1. Text Extraction    │  ← PyMuPDF (fitz)
+│     (per page)         │
+└──────────┬────────────┘
+           │  < 50 chars extracted?
+           ▼
+┌───────────────────────┐
+│  2. OCR Fallback       │  ← pytesseract on page images
+│     (scanned PDFs)     │
+└──────────┬────────────┘
+           │
+           ▼
+┌───────────────────────┐
+│  3. Canonical Mapping  │  ← Hybrid extraction pipeline:
+│                        │    1. Local Form 220 Positional mapping (fast, local)
+│                        │    2. Regex heuristic mapping (pattern matching)
+│                        │    3. AI LLM extraction (fallback for other forms/invoices)
+└──────────┬────────────┘
+           │
+           ▼
+┌───────────────────────┐
+│  4. Chunking           │  500-char chunks, 50-char overlap
+│     (per page)         │  Preserves page boundary context
+└──────────┬────────────┘
+           │
+           ▼
+┌───────────────────────┐
+│  5. Embedding          │  BAAI/bge-small-en-v1.5 (384-dim)
+│     (FastEmbed)        │  Runs via asyncio.run_in_executor
+└──────────┬────────────┘
+           │
+           ▼
+┌──────────┬────────────┐
+│ Postgres  │  Qdrant    │
+│ metadata  │  vectors   │
+└───────────┴────────────┘
 ```
 
+### 🧠 Hybrid Extraction Strategies
+The mapping stage follows a waterfall fallback design to ensure maximum reliability and lower latency:
+1. **Positional Mapping**: When a Form 220 layout is identified, it extracts fields based on sequential structured cell values (extremely precise, fast, and local).
+2. **Regex Heuristics**: Extracts fields based on pattern matching (e.g. document IDs, company NITs, values).
+3. **AI LLM Extraction (Optional Fallback)**: If critical fields (like employee name or gross income) are still missing, or if the document is of a completely different structure (e.g., invoices, other certificates), the pipeline calls Gemini or OpenAI to extract fields into the canonical schema.
+
+To enable AI extraction, set either `GEMINI_API_KEY` or `OPENAI_API_KEY` in your environment or configuration:
+```bash
+export GEMINI_API_KEY="your-gemini-key"
+# or
+export OPENAI_API_KEY="your-openai-key"
+```
+
+**Parallel processing**: Multiple uploaded PDFs are processed concurrently via `asyncio.gather`. Each pipeline stage is `async` to avoid blocking the event loop. The embedding model runs in a thread executor to prevent I/O starvation.
+
 ---
 
-## 🛠️ Tech Stack
+## 🚀 Setup & Run
 
-| Concern | Tool |
-|---|---|
-| Language | Python 3.14+ |
-| Package Manager | [UV](https://docs.astral.sh/) |
-| Framework | FastAPI |
-| Database | PostgreSQL (asyncpg + SQLAlchemy 2.0) |
-| DI Container | `dependency-injector` |
-| Style / Linting | Ruff (Format + Linter) |
-| Type Checking | MyPy |
-| Security Scanning | Bandit + Pip-audit |
+### Prerequisites
+- Docker & Docker Compose
+- Python 3.14+ with `uv`
+- Tesseract OCR installed on the host (for OCR fallback)
 
----
-
-## 🚀 Setup & Installation
-
-### 1. Synchronize Dependencies
-Ensure [UV](https://docs.astral.sh/) is installed, then run:
+### 1. Start Infrastructure
 
 ```bash
-# Clone the repository
-git clone https://github.com/SergioZona/hexagonal_backend_template.git
-cd hexagonal_backend_template
-
-# Sync and install environment
-uv sync --group dev
-```
-
-### 2. Configure Local Secrets
-Local defaults are already loaded from `src/env/.env` (gitignored). Copy the file and fill in your secrets:
-
-```ini
-# src/env/.env  — local developer secrets
-DATABASE_PASSWORD=your-local-password
-SECRET_KEY=your-local-secret
-```
-
----
-
-## 🏃 Running the Application
-
-Start the live-reloading FastAPI development server using the appropriate command for your operating system:
-
-### 💻 Bash / WSL / macOS
-```bash
-APP_ENV=dev DATABASE_PASSWORD=localpass SECRET_KEY=dev-secret \
-  uv run uvicorn app.infrastructure.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### 🐚 PowerShell (Windows)
-```powershell
-$env:APP_ENV="dev"; $env:DATABASE_PASSWORD="localpass"; $env:SECRET_KEY="dev-secret"
-uv run uvicorn app.infrastructure.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-The Swagger Interactive Docs will be accessible at: `http://localhost:8000/docs`
-
----
-
-## 🧪 Local CI & Quality Pipeline
-
-To maintain branch stability, you **MUST** execute the local pre-push check pipeline in this exact order:
-
-| Step | Command | Purpose |
-|---|---|---|
-| **1. Ruff Format** | `uv run ruff format src/ tests/` | Auto-format codebase |
-| **2. Ruff Lint** | `uv run ruff check src/ tests/ --fix` | Check style & code smells |
-| **3. Type Check** | `uv run mypy src/` | Static type enforcement |
-| **4. Test Suite** | `uv run pytest tests/` | Run all test boundaries |
-| **5. Security** | `uv run bandit -c pyproject.toml -r src/` | AST vulnerability scan |
-| **6. Audit** | `uv run pip-audit` | Check locked dependencies for CVEs |
-
-### 🔗 Chained One-Liner Execution
-
-#### Bash / WSL / macOS
-```bash
-uv run ruff format src/ tests/ && \
-uv run ruff check src/ tests/ --fix && \
-uv run mypy src/ && \
-uv run pytest tests/ && \
-uv run bandit -c pyproject.toml -r src/ && \
-uv run pip-audit
-```
-
-#### PowerShell (Windows)
-```powershell
-uv run ruff format src/ tests/; if ($?) { uv run ruff check src/ tests/ --fix }; if ($?) { uv run mypy src/ }; if ($?) { uv run pytest tests/ }; if ($?) { uv run bandit -c pyproject.toml -r src/ }; if ($?) { uv run pip-audit }
-```
-
----
-
-## 🐳 Docker Services
-
-Docker compose files are located in the `docker/` directory to keep the root directory clean.
-
-### Local Development Database (Postgres)
-```bash
-# Start Postgres local service
 docker compose -f docker/docker-compose.local.yml up -d
-
-# Stop Postgres local service
-docker compose -f docker/docker-compose.local.yml down
 ```
 
-### SonarQube Code Analyzer (Local)
+This starts:
+- `postgres:17-alpine` on port `5432`
+- `qdrant/qdrant:v1.12.0` on port `6333`
+
+### 2. Install Dependencies
+
 ```bash
-# Start local SonarQube
-docker compose -f docker/docker-compose.sonar.yml up -d
+uv sync --all-extras
+```
 
-# Stop local SonarQube
-docker compose -f docker/docker-compose.sonar.yml down
+### 3. Configure Environment
+
+Copy and edit the dev environment file:
+
+```bash
+# src/env/DEV.env — already configured for local Docker
+# Inject secrets at runtime:
+export DATABASE_PASSWORD=localpassword
+export SECRET_KEY=local-dev-secret
+```
+
+### 4. Run the API
+
+```bash
+APP_ENV=dev DATABASE_PASSWORD=localpassword SECRET_KEY=local-dev-secret \
+    uv run uvicorn app.infrastructure.main:app --reload
+```
+
+Or using the Dockerfile:
+
+```bash
+docker build -t tax-extractor .
+docker run -p 8000:8000 \
+  -e APP_ENV=dev \
+  -e DATABASE_PASSWORD=localpassword \
+  -e SECRET_KEY=local-dev-secret \
+  tax-extractor
 ```
 
 ---
 
-## 📚 Reference & Further Reading
-For advanced workflows, design rules, and architectures, refer directly to:
-- [📜 Project Constitution](docs/CONSTITUTION.md) — The ultimate code standards and architecture restrictions.
-- [🚀 Getting Started Guide](docs/getting_started.md) — Deep-dive developer guides and domain creation steps.
-- [🔍 Local CI Checks Guide](docs/LOCAL_CI_GUIDE.md) — How to troubleshoot formatting, type errors, or security scans.
-- [🧬 Architecture Boundaries](tests/architecture/test_boundaries.py) — Programmatic Hexagonal rule enforcement tests.
+## 📡 API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Liveness probe |
+| GET | `/ready` | Readiness probe |
+| POST | `/api/v1/documents/upload` | Upload 1–N PDF files for extraction |
+| GET | `/api/v1/documents` | List all extracted documents |
+
+Interactive docs: **http://localhost:8000/docs**
+
+### Upload Example
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/documents/upload" \
+  -F "files=@invoice1.pdf" \
+  -F "files=@invoice2.pdf"
+```
+
+### Response Format (JSend)
+
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id": "...",
+      "filename": "invoice1.pdf",
+      "invoice_number": "INV-0042",
+      "vendor": "ACME Corp",
+      "total_tax": 152.50,
+      "chunks_processed": 4
+    }
+  ]
+}
+```
 
 ---
 
-## 📝 License
-This project is licensed under the [MIT License](LICENSE).
+## ⚡ Design Decisions
+
+| Concern | Decision | Rationale |
+|---------|----------|-----------|
+| Architecture | Hexagonal (Ports & Adapters) | Decouples domain from infra; easy to swap adapters |
+| Vector DB | Qdrant + FastEmbed | Lightweight Docker image; native Python SDK |
+| Embedding model | `BAAI/bge-small-en-v1.5` (HuggingFace) | Self-contained, no API key needed, 384-dim cosine similarity |
+| OCR | pytesseract | Battle-tested; Tesseract is the standard open-source OCR engine |
+| PDF parsing | PyMuPDF | Fastest Python PDF library; handles text, images, and metadata |
+| Chunking | 500 chars / 50 overlap | Balances context preservation and embedding quality for tables |
+| Parallelism | `asyncio.gather` | Saturates I/O waits; parser and DB writes run concurrently |
+| DI | `dependency-injector` | Composition root pattern; testable via container overrides |
+
+---
+
+## 🧪 Development
+
+```bash
+# Run tests
+uv run pytest
+
+# Run linter
+uv run ruff check src/
+
+# Run type checker
+uv run mypy src/
+```

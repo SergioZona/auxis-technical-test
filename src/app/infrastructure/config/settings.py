@@ -26,20 +26,34 @@ class Settings(BaseSettings):
     api_version: str = "v1"
     debug: bool = False
     log_level: str = "INFO"
-    allowed_hosts: list[str] = ["*"]
+    allowed_hosts: str | list[str] = ["*"]
     database_host: str = "localhost"
     database_port: int = 5432
     database_name: str = "app_dev"
+    qdrant_host: str = "localhost"
+    qdrant_port: int = 6333
+    qdrant_collection: str = "documents"
+    max_upload_size_mb: int = 10
 
     # ── Secrets (injected at runtime — NEVER commit these) ──────────────────
     database_password: str = Field(default="", min_length=1)
     secret_key: str = Field(default="", min_length=1)
+    openai_api_key: str = Field(default="")
+    gemini_api_key: str = Field(default="")
 
     # ── Computed ─────────────────────────────────────────────────────────────
     @property
     def database_url(self) -> str:
         return (
             f"postgresql+asyncpg://"
+            f"app:{self.database_password}"
+            f"@{self.database_host}:{self.database_port}/{self.database_name}"
+        )
+
+    @property
+    def sync_database_url(self) -> str:
+        return (
+            f"postgresql://"
             f"app:{self.database_password}"
             f"@{self.database_host}:{self.database_port}/{self.database_name}"
         )
@@ -52,6 +66,25 @@ class Settings(BaseSettings):
         if upper not in allowed:
             raise ValueError(f"log_level must be one of {allowed}")
         return upper
+
+    @field_validator("allowed_hosts", mode="before")
+    @classmethod
+    def validate_allowed_hosts(cls, v: any) -> list[str]:
+        if isinstance(v, str):
+            val = v.strip()
+            if val.startswith("[") and val.endswith("]"):
+                try:
+                    import json
+                    parsed = json.loads(val)
+                    if isinstance(parsed, list):
+                        return [str(item).strip() for item in parsed]
+                except Exception:
+                    # Strip the brackets and process as comma-separated
+                    val = val[1:-1]
+            return [item.strip().strip("'\"") for item in val.split(",") if item.strip()]
+        elif isinstance(v, list):
+            return [str(item).strip() for item in v]
+        return v
 
     model_config = SettingsConfigDict(
         env_file=_env_file,

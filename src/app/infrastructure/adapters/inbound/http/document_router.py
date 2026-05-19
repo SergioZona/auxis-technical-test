@@ -1,0 +1,251 @@
+import os
+from typing import Annotated
+
+from dependency_injector.wiring import Provide, inject
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.application.use_cases.chat_rag_use_case import ChatRagUseCase
+from app.application.use_cases.process_documents_use_case import ProcessDocumentsUseCase
+from app.application.use_cases.query_database_use_case import QueryDatabaseUseCase
+from app.domain.exceptions.document_errors import FileSizeLimitExceededError
+from app.infrastructure.adapters.inbound.http.jsend import success
+from app.infrastructure.adapters.outbound.persistence.database import get_db_session
+from app.infrastructure.adapters.outbound.persistence.document_repository import (
+    PostgresDocumentRepository,
+)
+from app.infrastructure.config.container import Container
+
+router = APIRouter(tags=["documents"])
+
+
+class ChatRequest(BaseModel):
+    question: str
+
+
+class ChatResponse(BaseModel):
+    response: str
+    sources: list[dict] = []
+
+
+class DbQueryRequest(BaseModel):
+    query: str
+
+
+@router.post("/documents/upload")
+@inject
+async def upload_documents(
+    files: Annotated[list[UploadFile], File()],
+    process_use_case: ProcessDocumentsUseCase = Depends(
+        Provide[Container.process_documents_use_case]
+    ),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """
+    Upload multiple PDF documents for extraction.
+
+    **Pipeline:**
+    1. Validate file type (PDF) and size.
+    2. Extract text via PyMuPDF. Falls back to OCR (pytesseract) if scanned.
+    3. Map to canonical schema. Unknown fields go into `others`.
+    4. Chunk text (500 chars, 50 overlap).
+    5. Embed chunks using `BAAI/bge-small-en-v1.5` (Hugging Face via FastEmbed).
+    6. Store metadata in Postgres and embeddings in Qdrant.
+    """
+    file_tuples = []
+    
+    # Ensure upload directory exists
+    os.makedirs("data/uploads", exist_ok=True)
+    
+    for f in files:
+        if not f.filename or not f.filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail=f"File '{f.filename}' is not a PDF.")
+        content = await f.read()
+        file_tuples.append((f.filename, content))
+        
+        # Save to local disk for HITL viewing
+        with open(f"data/uploads/{f.filename}", "wb") as out_file:
+            out_file.write(content)
+
+    repository = PostgresDocumentRepository(session)
+
+    try:
+        documents = await process_use_case.execute(file_tuples, repository)
+    except FileSizeLimitExceededError as e:
+        raise HTTPException(status_code=413, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    res = [
+        {
+            "id": str(doc.id),
+            "filename": doc.filename,
+            "extraction_method": doc.extraction_method,
+            "form_type": doc.form_type,
+            "form_number": doc.extras.get("form_number") if doc.extras else None,
+            "tax_year": doc.tax_year,
+            "nit_employer": doc.nit_employer,
+            "employer_name": doc.employer_name,
+            "employee_document_id": doc.employee_document_id,
+            "employee_name": doc.employee_name,
+            "location": doc.extras.get("location") if doc.extras else None,
+            "period_start": doc.period_start,
+            "period_end": doc.period_end,
+            "total_gross_income": doc.total_gross_income,
+            "salary_payments": doc.extras.get("salary_payments") if doc.extras else None,
+            "social_benefits": doc.extras.get("social_benefits") if doc.extras else None,
+            "other_income_payments": doc.extras.get("other_income_payments") if doc.extras else None,
+            "health_contributions": doc.extras.get("health_contributions") if doc.extras else None,
+            "pension_contributions": doc.extras.get("pension_contributions") if doc.extras else None,
+            "average_monthly_income": doc.extras.get("average_monthly_income") if doc.extras else None,
+            "income_tax_withheld": doc.income_tax_withheld,
+            "total_annual_withholding": doc.extras.get("total_annual_withholding") if doc.extras else None,
+            "chunks_processed": len(doc.chunks),
+        }
+        for doc in documents
+    ]
+    return success(res)
+
+
+@router.get("/documents")
+@inject
+async def list_documents(
+    limit: int = 10,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """
+    Retrieve stored canonical document metadata from Postgres.
+    Supports pagination via `limit` and `offset` query parameters.
+    """
+    repository = PostgresDocumentRepository(session)
+    docs = await repository.list_all(limit=limit, offset=offset)
+    res = [
+        {
+            "id": str(doc.id),
+            "filename": doc.filename,
+            "upload_date": doc.upload_date.isoformat() if doc.upload_date else None,
+            "form_type": doc.form_type,
+            "form_number": doc.extras.get("form_number") if doc.extras else None,
+            "tax_year": doc.tax_year,
+            "nit_employer": doc.nit_employer,
+            "employer_name": doc.employer_name,
+            "employee_document_id": doc.employee_document_id,
+            "employee_name": doc.employee_name,
+            "location": doc.extras.get("location") if doc.extras else None,
+            "period_start": doc.period_start,
+            "period_end": doc.period_end,
+            "total_gross_income": doc.total_gross_income,
+            "salary_payments": doc.extras.get("salary_payments") if doc.extras else None,
+            "social_benefits": doc.extras.get("social_benefits") if doc.extras else None,
+            "other_income_payments": doc.extras.get("other_income_payments") if doc.extras else None,
+            "health_contributions": doc.extras.get("health_contributions") if doc.extras else None,
+            "pension_contributions": doc.extras.get("pension_contributions") if doc.extras else None,
+            "average_monthly_income": doc.extras.get("average_monthly_income") if doc.extras else None,
+            "income_tax_withheld": doc.income_tax_withheld,
+            "total_annual_withholding": doc.extras.get("total_annual_withholding") if doc.extras else None,
+            "extraction_method": doc.extraction_method,
+            "others": doc.extras,
+        }
+        for doc in docs
+    ]
+    return success(res)
+
+
+@router.post("/documents/chat")
+@inject
+async def chat_documents(
+    request: ChatRequest,
+    chat_use_case: ChatRagUseCase = Depends(Provide[Container.chat_rag_use_case]),
+):
+    """
+    Perform conversational RAG query over document chunks stored in Qdrant.
+    """
+    try:
+        result = await chat_use_case.execute(request.question)
+        return success({
+            "response": result.get("answer", ""),
+            "sources": result.get("sources", [])
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/documents/query-db")
+@inject
+async def query_db(
+    request: DbQueryRequest,
+    query_use_case: QueryDatabaseUseCase = Depends(Provide[Container.query_database_use_case]),
+):
+    """
+    Query the structured document metadata table in Postgres using natural language.
+    """
+    try:
+        answer = await query_use_case.execute(request.query)
+        return success({"response": answer})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/documents/{document_id}/pdf")
+@inject
+async def get_document_pdf(
+    document_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    from uuid import UUID
+    repository = PostgresDocumentRepository(session)
+    try:
+        doc_uuid = UUID(document_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid UUID format")
+    doc = await repository.get_by_id(doc_uuid)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    file_path = f"data/uploads/{doc.filename}"
+    import os
+    from fastapi.responses import FileResponse
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="PDF file not found on disk")
+        
+    return FileResponse(file_path, media_type="application/pdf", content_disposition_type="inline")
+
+@router.patch("/documents/{document_id}")
+@inject
+async def update_document(
+    document_id: str,
+    updates: dict,
+    session: AsyncSession = Depends(get_db_session),
+):
+    from uuid import UUID
+    repository = PostgresDocumentRepository(session)
+    try:
+        doc_uuid = UUID(document_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid UUID format")
+    doc = await repository.get_by_id(doc_uuid)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    # Apply updates
+    if "form_type" in updates: doc.form_type = updates["form_type"]
+    if "tax_year" in updates: doc.tax_year = updates["tax_year"]
+    if "nit_employer" in updates: doc.nit_employer = updates["nit_employer"]
+    if "employer_name" in updates: doc.employer_name = updates["employer_name"]
+    if "employee_name" in updates: doc.employee_name = updates["employee_name"]
+    if "total_gross_income" in updates: doc.total_gross_income = updates["total_gross_income"]
+    if "income_tax_withheld" in updates: doc.income_tax_withheld = updates["income_tax_withheld"]
+    
+    # Update extras
+    if not doc.extras:
+        doc.extras = {}
+    for key in ["form_number", "employee_document_id", "location", "salary_payments", "social_benefits", "other_income_payments", "health_contributions", "pension_contributions", "average_monthly_income", "total_annual_withholding"]:
+        if key in updates:
+            doc.extras[key] = updates[key]
+            
+    await repository.update(doc)
+    return success({"message": "Document updated successfully"})
+
+

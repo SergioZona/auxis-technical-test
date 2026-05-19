@@ -51,11 +51,4 @@ async def ready(settings: Annotated[Settings, Depends(get_settings)]) -> dict[st
     )
 
 
-@router.post(
-    "/ping",
-    summary="Ping / Pong",
-    description="Simple connectivity test. POST a ping, get a pong.",
-)
-async def ping() -> dict[str, Any]:
-    """Connectivity test endpoint."""
-    return success({"message": "pong"})
+
