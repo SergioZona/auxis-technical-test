@@ -1,5 +1,4 @@
 import abc
-from typing import List, Optional
 from uuid import UUID
 
 from app.domain.models.document import Document
@@ -16,12 +15,12 @@ class DocumentRepositoryPort(abc.ABC):
         pass
 
     @abc.abstractmethod
-    async def get_by_id(self, document_id: UUID) -> Optional[Document]:
+    async def get_by_id(self, document_id: UUID) -> Document | None:
         """Retrieves a document by its ID."""
         pass
 
     @abc.abstractmethod
-    async def list_all(self, limit: int = 100, offset: int = 0) -> List[Document]:
+    async def list_all(self, limit: int = 100, offset: int = 0) -> list[Document]:
         """Lists all stored documents."""
         pass
 

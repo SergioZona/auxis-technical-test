@@ -1,9 +1,10 @@
-import fitz
-import pytest
 from unittest.mock import AsyncMock
 
-from app.infrastructure.adapters.outbound.document_parser import PyMuPDFDocumentParser
+import fitz
+import pytest
+
 from app.domain.models.document import Document
+from app.infrastructure.adapters.outbound.document_parser import PyMuPDFDocumentParser
 
 
 @pytest.fixture
@@ -48,19 +49,36 @@ async def test_parse_text_only_pdf_success(
         "SERGIO",
         "JULIAN",
         "2025",  # stop word
-        "08", "11", "2025", "12", "31",  # period_start/end
+        "08",
+        "11",
+        "2025",
+        "12",
+        "31",  # period_start/end
         "COLOMBIA",  # location
         # Amounts (must have >= 27 entries)
         "$72.221.000",  # salary_payments (0)
-        "$0", "$0", "$0", "$0", "$0",
+        "$0",
+        "$0",
+        "$0",
+        "$0",
+        "$0",
         "$0",  # social_benefits (6)
-        "$0", "$0", "$0",
+        "$0",
+        "$0",
+        "$0",
         "$0",  # other_income_payments (10)
-        "$0", "$0", "$0", "$0", "$0",
+        "$0",
+        "$0",
+        "$0",
+        "$0",
+        "$0",
         "$72.221.000",  # total_gross_income (16)
         "$0",  # health_contributions (17)
         "$0",  # pension_contributions (18)
-        "$0", "$0", "$0", "$0",
+        "$0",
+        "$0",
+        "$0",
+        "$0",
         "$0",  # average_monthly_income (23)
         "$6.131.000",  # income_tax_withheld (24)
         "$0",

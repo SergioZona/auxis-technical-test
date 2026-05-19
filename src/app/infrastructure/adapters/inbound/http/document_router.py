@@ -1,5 +1,5 @@
 import os
-from typing import Annotated
+from typing import Annotated, Any
 
 from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -27,7 +27,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
-    sources: list[dict] = []
+    sources: list[dict[str, Any]] = []
 
 
 class DbQueryRequest(BaseModel):
@@ -42,7 +42,7 @@ async def upload_documents(
         Provide[Container.process_documents_use_case]
     ),
     session: AsyncSession = Depends(get_db_session),
-):
+) -> dict[str, Any]:
     """
     Upload multiple PDF documents for extraction.
 
@@ -55,16 +55,18 @@ async def upload_documents(
     6. Store metadata in Postgres and embeddings in Qdrant.
     """
     file_tuples = []
-    
+
     # Ensure upload directory exists
     os.makedirs("data/uploads", exist_ok=True)
-    
+
     for f in files:
         if not f.filename or not f.filename.lower().endswith(".pdf"):
-            raise HTTPException(status_code=400, detail=f"File '{f.filename}' is not a PDF.")
+            raise HTTPException(
+                status_code=400, detail=f"File '{f.filename}' is not a PDF."
+            )
         content = await f.read()
         file_tuples.append((f.filename, content))
-        
+
         # Save to local disk for HITL viewing
         with open(f"data/uploads/{f.filename}", "wb") as out_file:
             out_file.write(content)
@@ -74,9 +76,9 @@ async def upload_documents(
     try:
         documents = await process_use_case.execute(file_tuples, repository)
     except FileSizeLimitExceededError as e:
-        raise HTTPException(status_code=413, detail=str(e))
+        raise HTTPException(status_code=413, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
     res = [
         {
@@ -94,14 +96,28 @@ async def upload_documents(
             "period_start": doc.period_start,
             "period_end": doc.period_end,
             "total_gross_income": doc.total_gross_income,
-            "salary_payments": doc.extras.get("salary_payments") if doc.extras else None,
-            "social_benefits": doc.extras.get("social_benefits") if doc.extras else None,
-            "other_income_payments": doc.extras.get("other_income_payments") if doc.extras else None,
-            "health_contributions": doc.extras.get("health_contributions") if doc.extras else None,
-            "pension_contributions": doc.extras.get("pension_contributions") if doc.extras else None,
-            "average_monthly_income": doc.extras.get("average_monthly_income") if doc.extras else None,
+            "salary_payments": doc.extras.get("salary_payments")
+            if doc.extras
+            else None,
+            "social_benefits": doc.extras.get("social_benefits")
+            if doc.extras
+            else None,
+            "other_income_payments": doc.extras.get("other_income_payments")
+            if doc.extras
+            else None,
+            "health_contributions": doc.extras.get("health_contributions")
+            if doc.extras
+            else None,
+            "pension_contributions": doc.extras.get("pension_contributions")
+            if doc.extras
+            else None,
+            "average_monthly_income": doc.extras.get("average_monthly_income")
+            if doc.extras
+            else None,
             "income_tax_withheld": doc.income_tax_withheld,
-            "total_annual_withholding": doc.extras.get("total_annual_withholding") if doc.extras else None,
+            "total_annual_withholding": doc.extras.get("total_annual_withholding")
+            if doc.extras
+            else None,
             "chunks_processed": len(doc.chunks),
         }
         for doc in documents
@@ -110,12 +126,11 @@ async def upload_documents(
 
 
 @router.get("/documents")
-@inject
 async def list_documents(
     limit: int = 10,
     offset: int = 0,
     session: AsyncSession = Depends(get_db_session),
-):
+) -> dict[str, Any]:
     """
     Retrieve stored canonical document metadata from Postgres.
     Supports pagination via `limit` and `offset` query parameters.
@@ -138,14 +153,28 @@ async def list_documents(
             "period_start": doc.period_start,
             "period_end": doc.period_end,
             "total_gross_income": doc.total_gross_income,
-            "salary_payments": doc.extras.get("salary_payments") if doc.extras else None,
-            "social_benefits": doc.extras.get("social_benefits") if doc.extras else None,
-            "other_income_payments": doc.extras.get("other_income_payments") if doc.extras else None,
-            "health_contributions": doc.extras.get("health_contributions") if doc.extras else None,
-            "pension_contributions": doc.extras.get("pension_contributions") if doc.extras else None,
-            "average_monthly_income": doc.extras.get("average_monthly_income") if doc.extras else None,
+            "salary_payments": doc.extras.get("salary_payments")
+            if doc.extras
+            else None,
+            "social_benefits": doc.extras.get("social_benefits")
+            if doc.extras
+            else None,
+            "other_income_payments": doc.extras.get("other_income_payments")
+            if doc.extras
+            else None,
+            "health_contributions": doc.extras.get("health_contributions")
+            if doc.extras
+            else None,
+            "pension_contributions": doc.extras.get("pension_contributions")
+            if doc.extras
+            else None,
+            "average_monthly_income": doc.extras.get("average_monthly_income")
+            if doc.extras
+            else None,
             "income_tax_withheld": doc.income_tax_withheld,
-            "total_annual_withholding": doc.extras.get("total_annual_withholding") if doc.extras else None,
+            "total_annual_withholding": doc.extras.get("total_annual_withholding")
+            if doc.extras
+            else None,
             "extraction_method": doc.extraction_method,
             "others": doc.extras,
         }
@@ -159,26 +188,27 @@ async def list_documents(
 async def chat_documents(
     request: ChatRequest,
     chat_use_case: ChatRagUseCase = Depends(Provide[Container.chat_rag_use_case]),
-):
+) -> dict[str, Any]:
     """
     Perform conversational RAG query over document chunks stored in Qdrant.
     """
     try:
         result = await chat_use_case.execute(request.question)
-        return success({
-            "response": result.get("answer", ""),
-            "sources": result.get("sources", [])
-        })
+        return success(
+            {"response": result.get("answer", ""), "sources": result.get("sources", [])}
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/documents/query-db")
 @inject
 async def query_db(
     request: DbQueryRequest,
-    query_use_case: QueryDatabaseUseCase = Depends(Provide[Container.query_database_use_case]),
-):
+    query_use_case: QueryDatabaseUseCase = Depends(
+        Provide[Container.query_database_use_case]
+    ),
+) -> dict[str, Any]:
     """
     Query the structured document metadata table in Postgres using natural language.
     """
@@ -186,66 +216,88 @@ async def query_db(
         answer = await query_use_case.execute(request.query)
         return success({"response": answer})
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
 
 @router.get("/documents/{document_id}/pdf")
-@inject
 async def get_document_pdf(
     document_id: str,
     session: AsyncSession = Depends(get_db_session),
-):
+) -> FileResponse:
     from uuid import UUID
+
     repository = PostgresDocumentRepository(session)
     try:
         doc_uuid = UUID(document_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid UUID format")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid UUID format") from e
     doc = await repository.get_by_id(doc_uuid)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-        
+
     file_path = f"data/uploads/{doc.filename}"
     import os
+
     from fastapi.responses import FileResponse
+
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="PDF file not found on disk")
-        
-    return FileResponse(file_path, media_type="application/pdf", content_disposition_type="inline")
+
+    return FileResponse(
+        file_path, media_type="application/pdf", content_disposition_type="inline"
+    )
+
 
 @router.patch("/documents/{document_id}")
-@inject
 async def update_document(
     document_id: str,
-    updates: dict,
+    updates: dict[str, Any],
     session: AsyncSession = Depends(get_db_session),
-):
+) -> dict[str, Any]:
     from uuid import UUID
+
     repository = PostgresDocumentRepository(session)
     try:
         doc_uuid = UUID(document_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid UUID format")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid UUID format") from e
     doc = await repository.get_by_id(doc_uuid)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-        
+
     # Apply updates
-    if "form_type" in updates: doc.form_type = updates["form_type"]
-    if "tax_year" in updates: doc.tax_year = updates["tax_year"]
-    if "nit_employer" in updates: doc.nit_employer = updates["nit_employer"]
-    if "employer_name" in updates: doc.employer_name = updates["employer_name"]
-    if "employee_name" in updates: doc.employee_name = updates["employee_name"]
-    if "total_gross_income" in updates: doc.total_gross_income = updates["total_gross_income"]
-    if "income_tax_withheld" in updates: doc.income_tax_withheld = updates["income_tax_withheld"]
-    
+    if "form_type" in updates:
+        doc.form_type = updates["form_type"]
+    if "tax_year" in updates:
+        doc.tax_year = updates["tax_year"]
+    if "nit_employer" in updates:
+        doc.nit_employer = updates["nit_employer"]
+    if "employer_name" in updates:
+        doc.employer_name = updates["employer_name"]
+    if "employee_name" in updates:
+        doc.employee_name = updates["employee_name"]
+    if "total_gross_income" in updates:
+        doc.total_gross_income = updates["total_gross_income"]
+    if "income_tax_withheld" in updates:
+        doc.income_tax_withheld = updates["income_tax_withheld"]
+
     # Update extras
     if not doc.extras:
         doc.extras = {}
-    for key in ["form_number", "employee_document_id", "location", "salary_payments", "social_benefits", "other_income_payments", "health_contributions", "pension_contributions", "average_monthly_income", "total_annual_withholding"]:
+    for key in [
+        "form_number",
+        "employee_document_id",
+        "location",
+        "salary_payments",
+        "social_benefits",
+        "other_income_payments",
+        "health_contributions",
+        "pension_contributions",
+        "average_monthly_income",
+        "total_annual_withholding",
+    ]:
         if key in updates:
             doc.extras[key] = updates[key]
-            
+
     await repository.update(doc)
     return success({"message": "Document updated successfully"})
-
-

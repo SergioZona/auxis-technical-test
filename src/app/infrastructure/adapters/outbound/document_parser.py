@@ -12,13 +12,13 @@ Orchestrated via LangGraph:
 import io
 import logging
 import re
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, TypedDict
 
 import fitz  # PyMuPDF
 import pytesseract
-from PIL import Image
-from langgraph.graph import StateGraph, END
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langgraph.graph import END, StateGraph
+from PIL import Image
 
 from app.application.ports.outbound.ai_extractor_port import AiExtractorPort
 from app.application.ports.outbound.document_parser_port import DocumentParserPort
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 _OCR_FALLBACK_THRESHOLD = 100
 
 
-def _parse_amount(raw: str) -> Optional[float]:
+def _parse_amount(raw: str) -> float | None:
     """Convert Colombian-formatted number strings to float. e.g. '$72.221.000' → 72221000.0"""
     if not raw:
         return None
@@ -45,12 +45,12 @@ def _parse_amount(raw: str) -> Optional[float]:
 class ParserState(TypedDict):
     file_content: bytes
     filename: str
-    pages: List[Dict[str, Any]]
+    pages: list[dict[str, Any]]
     full_text: str
-    reconciled_metadata: Dict[str, Any]
-    reconciled_extras: Dict[str, Any]
-    chunks: List[DocumentChunk]
-    document: Optional[Document]
+    reconciled_metadata: dict[str, Any]
+    reconciled_extras: dict[str, Any]
+    chunks: list[DocumentChunk]
+    document: Document | None
 
 
 class PyMuPDFDocumentParser(DocumentParserPort):
@@ -61,7 +61,7 @@ class PyMuPDFDocumentParser(DocumentParserPort):
 
     def __init__(self, ai_extractor: AiExtractorPort):
         self._ai_extractor = ai_extractor
-        
+
         # Build LangGraph workflow
         builder = StateGraph(ParserState)
         builder.add_node("classify", self._classify_pages_node)
@@ -86,49 +86,55 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             "pages": [],
             "full_text": "",
             "reconciled_metadata": {},
+            "reconciled_extras": {},
             "chunks": [],
-            "document": None
+            "document": None,
         }
-        
+
         result = await self._graph.ainvoke(initial_state)
-        if not result or not result.get("document"):
+        if not result:
             raise ExtractionFailedError(f"LangGraph parsing failed for {filename}")
-        return result["document"]
+        doc = result.get("document")
+        if not isinstance(doc, Document):
+            raise ExtractionFailedError(f"LangGraph parsing failed for {filename}")
+        return doc
 
     # ── LangGraph Nodes ────────────────────────────────────────────────────
 
-    def _classify_pages_node(self, state: ParserState) -> Dict[str, Any]:
+    def _classify_pages_node(self, state: ParserState) -> dict[str, Any]:
         pdf = fitz.open(stream=state["file_content"], filetype="pdf")
         pages = []
         for n in range(len(pdf)):
             page_num = n + 1
             page = pdf.load_page(n)
             selectable_text = page.get_text()
-            
+
             has_images = len(page.get_images()) > 0
             has_drawings = len(page.get_drawings()) > 10
-            
+
             if len(selectable_text.strip()) < _OCR_FALLBACK_THRESHOLD:
                 classification = "scanned"
             elif has_images or has_drawings:
                 classification = "mixed"
             else:
                 classification = "text"
-                
-            pages.append({
-                "page_number": page_num,
-                "selectable_text": selectable_text,
-                "has_images": has_images,
-                "has_drawings": has_drawings,
-                "classification": classification,
-                "extracted_text": "",
-                "tables_text": "",
-                "ai_data": {}
-            })
+
+            pages.append(
+                {
+                    "page_number": page_num,
+                    "selectable_text": selectable_text,
+                    "has_images": has_images,
+                    "has_drawings": has_drawings,
+                    "classification": classification,
+                    "extracted_text": "",
+                    "tables_text": "",
+                    "ai_data": {},
+                }
+            )
         pdf.close()
         return {"pages": pages}
 
-    async def _extract_page_content_node(self, state: ParserState) -> Dict[str, Any]:
+    async def _extract_page_content_node(self, state: ParserState) -> dict[str, Any]:
         pdf = fitz.open(stream=state["file_content"], filetype="pdf")
         pages = list(state["pages"])
         full_text = ""
@@ -156,7 +162,9 @@ class PyMuPDFDocumentParser(DocumentParserPort):
                 logger.warning(f"PyMuPDF find_tables failed on page {page_num}: {e}")
 
             if classification == "scanned":
-                logger.info(f"{state['filename']}: Page {page_num} → scanned. Running OCR + AI.")
+                logger.info(
+                    f"{state['filename']}: Page {page_num} → scanned. Running OCR + AI."
+                )
                 pix = page.get_pixmap(dpi=200)
                 png_bytes = pix.tobytes("png")
 
@@ -183,7 +191,9 @@ class PyMuPDFDocumentParser(DocumentParserPort):
                     extracted_text += f"\n\n[AI Visual Analysis]:\n{desc}"
 
             elif classification == "mixed":
-                logger.info(f"{state['filename']}: Page {page_num} → mixed. Running OCR + AI.")
+                logger.info(
+                    f"{state['filename']}: Page {page_num} → mixed. Running OCR + AI."
+                )
                 pix = page.get_pixmap(dpi=200)
                 png_bytes = pix.tobytes("png")
 
@@ -198,7 +208,9 @@ class PyMuPDFDocumentParser(DocumentParserPort):
                 # Merge: selectable text + OCR (OCR may catch non-selectable image text)
                 combined_text = selectable_text
                 if ocr_text and ocr_text not in selectable_text:
-                    combined_text = f"{selectable_text}\n\n[OCR Supplement]:\n{ocr_text}"
+                    combined_text = (
+                        f"{selectable_text}\n\n[OCR Supplement]:\n{ocr_text}"
+                    )
 
                 # Step 2: AI extraction with merged text + image
                 ai_data = await self._ai_extractor.extract_metadata(
@@ -232,13 +244,13 @@ class PyMuPDFDocumentParser(DocumentParserPort):
         pdf.close()
         return {"pages": pages, "full_text": full_text}
 
-    async def _reconcile_metadata_node(self, state: ParserState) -> Dict[str, Any]:
+    async def _reconcile_metadata_node(self, state: ParserState) -> dict[str, Any]:
         filename = state["filename"]
         full_text = state["full_text"]
         pages = state["pages"]
 
         # Track the 10 canonical fields explicitly. Everything else goes into extras.
-        reconciled = {
+        reconciled: dict[str, Any] = {
             "form_type": None,
             "tax_year": None,
             "nit_employer": None,
@@ -250,12 +262,14 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             "total_gross_income": None,
             "income_tax_withheld": None,
         }
-        extras = {}
+        extras: dict[str, Any] = {}
 
         # ── Step 1: Always call LLM first on full document text ──────────────
         logger.info(f"'{filename}': Running document-level AI extraction (primary).")
-        ai_result = await self._ai_extractor.extract_metadata(text=full_text, filename=filename)
-        
+        ai_result = await self._ai_extractor.extract_metadata(
+            text=full_text, filename=filename
+        )
+
         if ai_result:
             for k in reconciled:
                 reconciled[k] = ai_result.get(k)
@@ -267,7 +281,7 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             for k in reconciled:
                 if reconciled[k] is None and k in ai_val:
                     reconciled[k] = ai_val[k]
-                    
+
             page_extras = ai_val.get("extras") or {}
             for k, v in page_extras.items():
                 if v is not None and extras.get(k) is None:
@@ -292,7 +306,7 @@ class PyMuPDFDocumentParser(DocumentParserPort):
                             val = getattr(temp_doc, k, None)
                             if val is not None:
                                 reconciled[k] = val
-                    
+
                     # Merge temp_doc extras if any
                     for k, v in temp_doc.extras.items():
                         if v is not None and extras.get(k) is None:
@@ -305,7 +319,7 @@ class PyMuPDFDocumentParser(DocumentParserPort):
 
         return {"reconciled_metadata": reconciled, "reconciled_extras": extras}
 
-    def _generate_chunks_node(self, state: ParserState) -> Dict[str, Any]:
+    def _generate_chunks_node(self, state: ParserState) -> dict[str, Any]:
         chunks = []
         chunk_idx = 0
         for p in state["pages"]:
@@ -316,70 +330,84 @@ class PyMuPDFDocumentParser(DocumentParserPort):
                 chunk_idx += 1
         return {"chunks": chunks}
 
-    def _assemble_document_node(self, state: ParserState) -> Dict[str, Any]:
+    def _assemble_document_node(self, state: ParserState) -> dict[str, Any]:
         filename = state["filename"]
         reconciled = state["reconciled_metadata"]
         extras = state["reconciled_extras"]
         chunks = state["chunks"]
         pages = state["pages"]
-        
+
         has_scanned = any(p["classification"] == "scanned" for p in pages)
         extraction_method = "ocr" if has_scanned else "text"
         if not has_scanned and any(p["classification"] == "mixed" for p in pages):
             extraction_method = "hybrid"
-            
+
         doc = Document(filename=filename, extraction_method=extraction_method)
-        
+
         for k, v in reconciled.items():
             setattr(doc, k, v)
-            
+
         for c in chunks:
             doc.add_chunk(c)
-            
+
         doc.extras = extras
         doc.extras["raw_text_preview"] = state["full_text"][:300].strip()
         doc.page_count = len(pages)
-        
+
         return {"document": doc}
 
     # ── Helpers ────────────────────────────────────────────────────────────
 
     def _apply_regex_fallbacks(
-        self, text: str, reconciled: Dict[str, Any], extras: Dict[str, Any]
-    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        self, text: str, reconciled: dict[str, Any], extras: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         res = dict(reconciled)
         ext = dict(extras)
-        
+
         if not ext.get("form_number"):
-            m = re.search(r"(?:Número de formulario|No\.?\s*formulario)[:\s]*(\d+)", text, re.IGNORECASE)
+            m = re.search(
+                r"(?:Número de formulario|No\.?\s*formulario)[:\s]*(\d+)",
+                text,
+                re.IGNORECASE,
+            )
             if m:
                 ext["form_number"] = m.group(1).strip()
-                
+
         if not res.get("form_type"):
             m = re.search(r"\b(220|210|2516|110)\b", text)
             if m:
                 res["form_type"] = m.group(1)
-                
+
         if not res.get("tax_year"):
-            m = re.search(r"(?:Año gravable|gravable)[:\s]*(\d{4})", text, re.IGNORECASE)
+            m = re.search(
+                r"(?:Año gravable|gravable)[:\s]*(\d{4})", text, re.IGNORECASE
+            )
             if m:
                 res["tax_year"] = int(m.group(1))
-                
+
         if not res.get("employer_name"):
-            m = re.search(r"(?:Razón social|Razon social)[:\s]*(.+?)(?:\n|NIT|$)", text, re.IGNORECASE)
+            m = re.search(
+                r"(?:Razón social|Razon social)[:\s]*(.+?)(?:\n|NIT|$)",
+                text,
+                re.IGNORECASE,
+            )
             if m:
                 res["employer_name"] = m.group(1).strip()
-                
+
         if not res.get("nit_employer"):
             m = re.search(r"(?:NIT|N\.I\.T\.)[:\s]*([\d.-]+)", text, re.IGNORECASE)
             if m:
                 res["nit_employer"] = m.group(1).strip()
-                
+
         if not res.get("employee_document_id"):
-            m = re.search(r"(?:Número de identificación|No.*identificacion)[:\s]*([\d.]+)", text, re.IGNORECASE)
+            m = re.search(
+                r"(?:Número de identificación|No.*identificacion)[:\s]*([\d.]+)",
+                text,
+                re.IGNORECASE,
+            )
             if m:
                 res["employee_document_id"] = m.group(1).strip()
-                
+
         if not res.get("employee_name"):
             m = re.search(
                 r"(?:Primer apellido|MORENO)[:\s]*(\w+)\s+(?:Segundo apellido)?[:\s]*(\w+)?\s+(?:Primer nombre)?[:\s]*(\w+)?",
@@ -389,26 +417,33 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             if m:
                 parts = [p for p in [m.group(1), m.group(2), m.group(3)] if p]
                 res["employee_name"] = " ".join(parts)
-                
+
         if not ext.get("location"):
-            m = re.search(r"(?:BOGOTA|Bogotá|Medellín|Cali|Barranquilla|Cartagena|[A-ZÁÉÍÓÚ]{4,})\s*$", text, re.MULTILINE)
+            m = re.search(
+                r"(?:BOGOTA|Bogotá|Medellín|Cali|Barranquilla|Cartagena|[A-ZÁÉÍÓÚ]{4,})\s*$",
+                text,
+                re.MULTILINE,
+            )
             if m:
                 ext["location"] = m.group(0).strip()
-                
+
         dates = re.findall(r"\d{4}[-/]\d{2}[-/]\d{2}", text)
         if len(dates) > 0 and not res.get("period_start"):
             res["period_start"] = dates[0]
         if len(dates) > 1 and not res.get("period_end"):
             res["period_end"] = dates[1]
-            
-        def _find_amount(label: str) -> Optional[float]:
+
+        def _find_amount(label: str) -> float | None:
             pattern = rf"{label}[^\n]*?(\$?[\d]{{1,3}}(?:\.[\d]{{3}})*(?:,\d{{2}})?)"
             m = re.search(pattern, text, re.IGNORECASE)
             return _parse_amount(m.group(1)) if m else None
-            
+
         for k, label in [
             ("total_gross_income", r"Total\s+ingresos\s+brutos"),
-            ("income_tax_withheld", r"Valor\s+de\s+la\s+retenci[oó]n\s+en\s+la\s+fuente"),
+            (
+                "income_tax_withheld",
+                r"Valor\s+de\s+la\s+retenci[oó]n\s+en\s+la\s+fuente",
+            ),
         ]:
             if res.get(k) is None:
                 res[k] = _find_amount(label)
@@ -418,13 +453,16 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             ("social_benefits", r"Pagos\s+por\s+prestaciones\s+sociales"),
             ("other_income_payments", r"Otros\s+pagos"),
             ("health_contributions", r"Aportes\s+obligatorios\s+por\s+salud"),
-            ("pension_contributions", r"Aportes\s+obligatorios\s+a\s+fondos\s+de\s+pensiones"),
+            (
+                "pension_contributions",
+                r"Aportes\s+obligatorios\s+a\s+fondos\s+de\s+pensiones",
+            ),
             ("average_monthly_income", r"Ingreso\s+laboral\s+promedio"),
             ("total_annual_withholding", r"Total\s+retenci[oó]n\s+a[ñn]o\s+gravable"),
         ]:
             if ext.get(k) is None:
                 ext[k] = _find_amount(label)
-                
+
         return res, ext
 
     def _smart_chunk_page(
@@ -433,19 +471,19 @@ class PyMuPDFDocumentParser(DocumentParserPort):
         text: str,
         chunk_size: int = 500,
         chunk_overlap: int = 50,
-    ) -> List[DocumentChunk]:
+    ) -> list[DocumentChunk]:
         """Split page text using LangChain's RecursiveCharacterTextSplitter."""
         if not text.strip():
             return []
-            
+
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             separators=["\n\n", "\n", ".", " ", ""],
         )
-        
+
         raw_chunks = splitter.split_text(text)
-        
+
         chunks = []
         for i, chunk_text in enumerate(raw_chunks):
             chunks.append(
@@ -472,7 +510,9 @@ class PyMuPDFDocumentParser(DocumentParserPort):
                 lines.append(line_str)
 
         for line in lines:
-            m = re.search(r"(?:Año gravable|gravable)[:\s]*(\d{4})", line, re.IGNORECASE)
+            m = re.search(
+                r"(?:Año gravable|gravable)[:\s]*(\d{4})", line, re.IGNORECASE
+            )
             if m:
                 doc.tax_year = int(m.group(1))
                 break
@@ -486,7 +526,9 @@ class PyMuPDFDocumentParser(DocumentParserPort):
         if header_idx != -1:
             sub = lines[header_idx + 1 :]
             idx = 0
-            while idx < len(sub) and ("año gravable" in sub[idx].lower() or "ano gravable" in sub[idx].lower()):
+            while idx < len(sub) and (
+                "año gravable" in sub[idx].lower() or "ano gravable" in sub[idx].lower()
+            ):
                 idx += 1
 
             form_num_val = None
@@ -539,17 +581,25 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             elif name_parts:
                 doc.employee_name = " ".join(name_parts)
 
-            date_ints = []
+            date_ints: list[str] = []
             while idx < len(sub) and len(date_ints) < 9:
                 if sub[idx].isdigit() and len(sub[idx]) <= 4:
                     date_ints.append(sub[idx])
                 idx += 1
 
             if len(date_ints) >= 6:
-                doc.period_start = f"{date_ints[0]}-{date_ints[1].zfill(2)}-{date_ints[2].zfill(2)}"
-                doc.period_end = f"{date_ints[3]}-{date_ints[4].zfill(2)}-{date_ints[5].zfill(2)}"
+                doc.period_start = (
+                    f"{date_ints[0]}-{date_ints[1].zfill(2)}-{date_ints[2].zfill(2)}"
+                )
+                doc.period_end = (
+                    f"{date_ints[3]}-{date_ints[4].zfill(2)}-{date_ints[5].zfill(2)}"
+                )
 
-            if idx < len(sub) and not sub[idx].startswith("$") and not sub[idx].isdigit():
+            if (
+                idx < len(sub)
+                and not sub[idx].startswith("$")
+                and not sub[idx].isdigit()
+            ):
                 doc.location = sub[idx]
                 idx += 1
 

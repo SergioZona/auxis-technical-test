@@ -1,223 +1,112 @@
-# 🧾 Tax Document Extraction API
+# AI Engineer Take-Home Exercise: Tax Document Extraction & RAG API
 
-A production-ready backend that accepts PDF tax documents, extracts structured data using a **text + OCR preprocessing pipeline**, stores canonical metadata in **PostgreSQL**, and persists vector embeddings in **Qdrant** for semantic search. Built with **FastAPI** following **Hexagonal Architecture** (Ports & Adapters).
+This repository implements the solution to the **AI Engineer Take-Home Exercise**. It is a document intelligence platform designed to ingest PDF tax certificates (such as Form 220 and other formats), extract their structured metadata and financial metrics, store them in a database, and support natural language queries over the processed data.
 
 ---
 
-## 📐 Architecture
+## 🎨 System Architecture
 
 ### C4 Component Diagram
 
 ```mermaid
 C4Component
-    title Tax Document Extraction API — C4 Component Diagram
+    title C4 Component Diagram — Tax Extraction & Query System
 
-    Container_Boundary(api, "FastAPI Application") {
-        Component(health_router, "Health Router", "FastAPI Router", "Liveness, readiness, and ping probes")
-        Component(document_router, "Document Router", "FastAPI Router", "POST /documents/upload, GET /documents")
-        Component(item_router, "Item Router", "FastAPI Router", "CRUD items (template example)")
-
-        Component(process_uc, "ProcessDocuments UseCase", "Python Class", "Orchestrates: parse → save → embed. Runs files concurrently via asyncio.gather")
-        Component(parser, "PyMuPDFDocumentParser", "Outbound Adapter", "Extracts text from PDFs. Falls back to pytesseract OCR for scanned docs. Maps to Canonical schema. Unknown fields → metadata_others")
-        Component(doc_repo, "PostgresDocumentRepository", "Outbound Adapter (SQLAlchemy)", "Stores canonical document metadata in PostgreSQL")
-        Component(vector_repo, "QdrantVectorRepository", "Outbound Adapter (FastEmbed)", "Embeds text chunks using BAAI/bge-small-en-v1.5. Stores in Qdrant")
-        Component(container, "DI Container", "dependency-injector", "Composition root. Wires all adapters to ports and use cases")
-        Component(settings, "Settings", "pydantic-settings", "Typed config loaded from src/env/*.env files")
+    Container_Boundary(api, "FastAPI Ingestion & Query API") {
+        Component(document_router, "Document Router", "FastAPI Router", "Ingestion (upload), retrieve documents, update records, and get PDFs")
+        Component(process_uc, "ProcessDocuments UseCase", "Python Class", "Pipeline coordinator: parse → persist → embed")
+        Component(parser, "PyMuPDFDocumentParser", "Outbound Adapter", "Local PyMuPDF extraction with pytesseract OCR fallback")
+        Component(doc_repo, "PostgresDocumentRepository", "Outbound Adapter", "SQLAlchemy ORM adapter for database access")
+        Component(vector_repo, "QdrantVectorRepository", "Outbound Adapter", "Embeds text chunks and saves to vector DB")
+        Component(settings, "Settings", "pydantic-settings", "Loads environment config from src/env/.env")
     }
 
-    ContainerDb(postgres, "PostgreSQL 17", "Relational Database", "Stores: filename, canonical fields (invoice_number, date, total_tax, vendor), metadata_others (JSONB)")
-    ContainerDb(qdrant, "Qdrant", "Vector Database", "Stores: text chunks + 384-dim embeddings (BAAI/bge-small-en-v1.5)")
+    Container_Boundary(frontend, "Streamlit Dashboard UI") {
+        Component(ui, "Streamlit App", "Python Streamlit", "Upload docs, edit metadata, view PDFs, and chat with data")
+    }
 
-    Rel(document_router, process_uc, "Invokes")
-    Rel(process_uc, parser, "Uses (DocumentParserPort)")
-    Rel(process_uc, doc_repo, "Uses (DocumentRepositoryPort)")
-    Rel(process_uc, vector_repo, "Uses (VectorPort)")
+    ContainerDb(postgres, "PostgreSQL 17", "Relational Database", "Stores canonical document metadata and extraction logs")
+    ContainerDb(qdrant, "Qdrant", "Vector Database", "Stores text chunks and 384-dim BAAI/bge-small-en-v1.5 embeddings")
+
+    Rel(ui, document_router, "Consumes HTTP Endpoints", "JSON / Multipart")
+    Rel(document_router, process_uc, "Triggers Ingestion / Chat")
+    Rel(process_uc, parser, "Uses")
+    Rel(process_uc, doc_repo, "Uses")
+    Rel(process_uc, vector_repo, "Uses")
     Rel(doc_repo, postgres, "Reads/Writes")
     Rel(vector_repo, qdrant, "Reads/Writes")
-    Rel(container, process_uc, "Wires parser + vector_repo")
-    Rel(container, settings, "Reads config")
 ```
 
 ---
 
-## 🔄 Preprocessing Pipeline
+## ⚙️ Processing & Extraction Pipeline
 
-```
-PDF Upload
-    │
-    ▼
-┌───────────────────────┐
-│  1. Text Extraction    │  ← PyMuPDF (fitz)
-│     (per page)         │
-└──────────┬────────────┘
-           │  < 50 chars extracted?
-           ▼
-┌───────────────────────┐
-│  2. OCR Fallback       │  ← pytesseract on page images
-│     (scanned PDFs)     │
-└──────────┬────────────┘
-           │
-           ▼
-┌───────────────────────┐
-│  3. Canonical Mapping  │  ← Hybrid extraction pipeline:
-│                        │    1. Local Form 220 Positional mapping (fast, local)
-│                        │    2. Regex heuristic mapping (pattern matching)
-│                        │    3. AI LLM extraction (fallback for other forms/invoices)
-└──────────┬────────────┘
-           │
-           ▼
-┌───────────────────────┐
-│  4. Chunking           │  500-char chunks, 50-char overlap
-│     (per page)         │  Preserves page boundary context
-└──────────┬────────────┘
-           │
-           ▼
-┌───────────────────────┐
-│  5. Embedding          │  BAAI/bge-small-en-v1.5 (384-dim)
-│     (FastEmbed)        │  Runs via asyncio.run_in_executor
-└──────────┬────────────┘
-           │
-           ▼
-┌──────────┬────────────┐
-│ Postgres  │  Qdrant    │
-│ metadata  │  vectors   │
-└───────────┴────────────┘
-```
-
-### 🧠 Hybrid Extraction Strategies
-The mapping stage follows a waterfall fallback design to ensure maximum reliability and lower latency:
-1. **Positional Mapping**: When a Form 220 layout is identified, it extracts fields based on sequential structured cell values (extremely precise, fast, and local).
-2. **Regex Heuristics**: Extracts fields based on pattern matching (e.g. document IDs, company NITs, values).
-3. **AI LLM Extraction (Optional Fallback)**: If critical fields (like employee name or gross income) are still missing, or if the document is of a completely different structure (e.g., invoices, other certificates), the pipeline calls Gemini or OpenAI to extract fields into the canonical schema.
-
-To enable AI extraction, set either `GEMINI_API_KEY` or `OPENAI_API_KEY` in your environment or configuration:
-```bash
-export GEMINI_API_KEY="your-gemini-key"
-# or
-export OPENAI_API_KEY="your-openai-key"
-```
-
-**Parallel processing**: Multiple uploaded PDFs are processed concurrently via `asyncio.gather`. Each pipeline stage is `async` to avoid blocking the event loop. The embedding model runs in a thread executor to prevent I/O starvation.
+1. **Text Extraction**: The PDF is parsed using **PyMuPDF**.
+2. **OCR Fallback**: If the extracted text has fewer than 50 characters, it falls back to **Tesseract OCR** on page images to handle scanned documents.
+3. **Canonical Mapping**: Structured fields are extracted using a hierarchical fallback strategy:
+   * *Positional Mapping*: Parses sequential structured values if the document matches the Form 220 template layout.
+   * *Regex Heuristics*: Standard pattern matching for NIT, names, and numbers.
+   * *AI LLM Extraction*: Call Gemini or OpenAI to extract fields into the schema as a fallback.
+4. **Chunking & Vector Storage**: Chunks the text (500 chars, 50-char overlap) and stores the embeddings in **Qdrant** for semantic search.
+5. **Relational Storage**: The parsed document information is saved to **PostgreSQL**.
 
 ---
 
-## 🚀 Setup & Run
+## 🚀 Setup & Execution
 
 ### Prerequisites
 - Docker & Docker Compose
-- Python 3.14+ with `uv`
-- Tesseract OCR installed on the host (for OCR fallback)
+- Python 3.14+
+- Tesseract OCR (for scanned PDF extraction)
 
-### 1. Start Infrastructure
-
+### 1. Launch Infrastructure
+Start PostgreSQL and Qdrant in the background:
 ```bash
 docker compose -f docker/docker-compose.local.yml up -d
 ```
 
-This starts:
-- `postgres:17-alpine` on port `5432`
-- `qdrant/qdrant:v1.12.0` on port `6333`
-
-### 2. Install Dependencies
-
+### 2. Configure Environment
+Copy the environment file or use the preconfigured default `src/env/.env`:
 ```bash
-uv sync --all-extras
+# Optional API keys to enable LLM extraction fallback and LLM-powered chat routing:
+export GEMINI_API_KEY="your-gemini-api-key"
+export OPENAI_API_KEY="your-openai-api-key"
 ```
 
-### 3. Configure Environment
-
-Copy and edit the dev environment file:
-
+### 3. Start Backend API
+Run the FastAPI server locally:
 ```bash
-# src/env/DEV.env — already configured for local Docker
-# Inject secrets at runtime:
-export DATABASE_PASSWORD=localpassword
-export SECRET_KEY=local-dev-secret
+uv run --env-file src/env/.env uvicorn app.infrastructure.main:app --reload
 ```
+*Note: Use forward slashes (`/`) for the `--env-file` parameter path to avoid PowerShell backslash escape errors.*
 
-### 4. Run the API
+Interactive Swagger documentation will be available at: **http://localhost:8000/docs**
 
+### 4. Start Streamlit UI
+Run the frontend dashboard to upload PDFs, edit/verify extracted data, and chat:
 ```bash
-APP_ENV=dev DATABASE_PASSWORD=localpassword SECRET_KEY=local-dev-secret \
-    uv run uvicorn app.infrastructure.main:app --reload
+uv run streamlit run ui/app.py
 ```
-
-Or using the Dockerfile:
-
-```bash
-docker build -t tax-extractor .
-docker run -p 8000:8000 \
-  -e APP_ENV=dev \
-  -e DATABASE_PASSWORD=localpassword \
-  -e SECRET_KEY=local-dev-secret \
-  tax-extractor
-```
+Open **http://localhost:8501** in your browser.
 
 ---
 
-## 📡 API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/health` | Liveness probe |
-| GET | `/ready` | Readiness probe |
-| POST | `/api/v1/documents/upload` | Upload 1–N PDF files for extraction |
-| GET | `/api/v1/documents` | List all extracted documents |
-
-Interactive docs: **http://localhost:8000/docs**
-
-### Upload Example
+## 🧪 Development, Quality & Tests
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/documents/upload" \
-  -F "files=@invoice1.pdf" \
-  -F "files=@invoice2.pdf"
-```
+# Run test suite and check code coverage (enforcing >80%)
+uv run pytest --cov=src --cov-report=term-missing
 
-### Response Format (JSend)
+# Run Ruff linter
+uv run ruff check src/ tests/
 
-```json
-{
-  "status": "success",
-  "data": [
-    {
-      "id": "...",
-      "filename": "invoice1.pdf",
-      "invoice_number": "INV-0042",
-      "vendor": "ACME Corp",
-      "total_tax": 152.50,
-      "chunks_processed": 4
-    }
-  ]
-}
-```
-
----
-
-## ⚡ Design Decisions
-
-| Concern | Decision | Rationale |
-|---------|----------|-----------|
-| Architecture | Hexagonal (Ports & Adapters) | Decouples domain from infra; easy to swap adapters |
-| Vector DB | Qdrant + FastEmbed | Lightweight Docker image; native Python SDK |
-| Embedding model | `BAAI/bge-small-en-v1.5` (HuggingFace) | Self-contained, no API key needed, 384-dim cosine similarity |
-| OCR | pytesseract | Battle-tested; Tesseract is the standard open-source OCR engine |
-| PDF parsing | PyMuPDF | Fastest Python PDF library; handles text, images, and metadata |
-| Chunking | 500 chars / 50 overlap | Balances context preservation and embedding quality for tables |
-| Parallelism | `asyncio.gather` | Saturates I/O waits; parser and DB writes run concurrently |
-| DI | `dependency-injector` | Composition root pattern; testable via container overrides |
-
----
-
-## 🧪 Development
-
-```bash
-# Run tests
-uv run pytest
-
-# Run linter
-uv run ruff check src/
-
-# Run type checker
+# Run Mypy static type checker
 uv run mypy src/
 ```
+
+---
+
+## 💡 Engineering & Scaling Decisions
+
+* **Concurrence & Parallel Processing**: Multiple PDF uploads are executed concurrently using `asyncio.gather` to saturate I/O wait times. The heavy machine learning task of generating text embeddings (FastEmbed) runs on a dedicated thread executor via `asyncio.run_in_executor` to avoid blocking FastAPI's main event loop.
+* **Human-in-the-Loop Verification**: Since AI extraction is probabilistic, the Streamlit UI provides a form to review and correct metadata side-by-side with the original PDF. Changes are saved back to PostgreSQL using a `PATCH` endpoint.

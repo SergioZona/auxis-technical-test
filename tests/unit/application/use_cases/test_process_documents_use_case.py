@@ -23,7 +23,9 @@ def mock_repository() -> AsyncMock:
 
 
 @pytest.fixture
-def use_case(mock_parser: AsyncMock, mock_vector_db: AsyncMock) -> ProcessDocumentsUseCase:
+def use_case(
+    mock_parser: AsyncMock, mock_vector_db: AsyncMock
+) -> ProcessDocumentsUseCase:
     return ProcessDocumentsUseCase(
         parser=mock_parser,
         vector_db=mock_vector_db,

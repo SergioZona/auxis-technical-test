@@ -64,11 +64,18 @@ target-version = "py314"
 src = ["src"]
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "B", "C4", "UP", "SIM", "TCH", "S"]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "SIM", "S"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]  # allow assert in tests
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.params.Depends",
+    "dependency_injector.wiring.Provide",
+]
 
 [tool.ruff.format]
 quote-style = "double"

@@ -1,5 +1,4 @@
 import abc
-from typing import List, Optional
 from uuid import UUID
 
 from app.domain.models.document import DocumentChunk
@@ -11,12 +10,12 @@ class VectorPort(abc.ABC):
     """
 
     @abc.abstractmethod
-    async def upsert_chunks(self, chunks: List[DocumentChunk]) -> None:
+    async def upsert_chunks(self, chunks: list[DocumentChunk]) -> None:
         """Upserts a list of document chunks into the vector database."""
         pass
 
     @abc.abstractmethod
-    async def search(self, query_text: str, limit: int = 5) -> List[DocumentChunk]:
+    async def search(self, query_text: str, limit: int = 5) -> list[DocumentChunk]:
         """Searches the vector database for chunks similar to the query."""
         pass
 

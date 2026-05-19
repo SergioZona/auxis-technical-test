@@ -3,7 +3,6 @@ Invoice RAG — Document Intelligence UI
 Streamlit frontend for uploading, inspecting, and querying invoices/certificates.
 """
 
-import json
 
 import requests
 import streamlit as st
@@ -52,7 +51,7 @@ def render_sources(sources):
             doc_id = src.get('document_id', 'N/A')
             page_num = src.get('page_number', 'N/A')
             text = src.get('text', '')
-            
+
             if doc_id == "Database":
                 st.markdown(f"📊 **Source {idx + 1}**: PostgreSQL Metadata Database")
                 # Normalize double backslashes which can occur from JSON responses
@@ -164,18 +163,18 @@ elif page == "Browse Documents":
 
         with col1:
             st.subheader("📝 Edit Extracted Metadata")
-            
+
             # Form fields
             form_type = st.text_input("Form Type", value=selected_doc.get("form_type") or "")
             tax_year = st.number_input("Tax Year", value=int(selected_doc.get("tax_year")) if selected_doc.get("tax_year") else 2026, step=1)
             nit_employer = st.text_input("Employer NIT", value=selected_doc.get("nit_employer") or "")
             employer_name = st.text_input("Employer Name", value=selected_doc.get("employer_name") or "")
             employee_name = st.text_input("Employee Name", value=selected_doc.get("employee_name") or "")
-            
+
             # Financials
             total_gross = st.number_input("Total Gross Income", value=float(selected_doc.get("total_gross_income")) if selected_doc.get("total_gross_income") is not None else 0.0, step=1000.0)
             tax_withheld = st.number_input("Income Tax Withheld", value=float(selected_doc.get("income_tax_withheld")) if selected_doc.get("income_tax_withheld") is not None else 0.0, step=1000.0)
-            
+
             # Extras
             with st.expander("Secondary Fields & Deductions"):
                 form_number = st.text_input("Form Number", value=selected_doc.get("form_number") or "")
@@ -209,7 +208,7 @@ elif page == "Browse Documents":
                     "average_monthly_income": avg_inc,
                     "total_annual_withholding": total_withheld,
                 }
-                
+
                 with st.spinner("Saving corrections to database…"):
                     try:
                         patch_resp = requests.patch(
@@ -226,7 +225,7 @@ elif page == "Browse Documents":
         with col2:
             st.subheader("📄 Original Document PDF")
             pdf_url = f"{API_BASE}/documents/{selected_doc.get('id')}/pdf"
-            
+
             # Embed PDF using HTML iframe
             pdf_iframe = f'<iframe src="{pdf_url}" width="100%" height="700px" style="border: none;"></iframe>'
             st.markdown(pdf_iframe, unsafe_allow_html=True)
@@ -266,9 +265,9 @@ elif page == "Chat":
                 except Exception as e:
                     answer = f"❌ Error: {e}"
                     sources = []
-                    
+
             st.markdown(answer)
             if sources:
                 render_sources(sources)
-            
+
             st.session_state.chat_history.append({"role": "assistant", "content": answer, "sources": sources})

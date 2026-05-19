@@ -7,8 +7,8 @@ Processing metadata (file_size, page_count, processing_time_ms) is tracked separ
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from .shared import Entity
@@ -21,8 +21,8 @@ class DocumentChunk(Entity):
     id: UUID = field(default_factory=uuid4)
     document_id: UUID = field(default_factory=uuid4)
     text: str = ""
-    page_number: Optional[int] = None
-    embedding: Optional[List[float]] = None
+    page_number: int | None = None
+    embedding: list[float] | None = None
     chunk_index: int = 0
 
 
@@ -56,42 +56,58 @@ class Document(Entity):
 
     id: UUID = field(default_factory=uuid4)
     filename: str = ""
-    upload_date: datetime = field(default_factory=datetime.utcnow)
+    upload_date: datetime = field(
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None)
+    )
 
     # ── 10 canonical columns ──────────────────────────────────────────────────
-    form_type: Optional[str] = None
-    tax_year: Optional[int] = None
-    nit_employer: Optional[str] = None
-    employer_name: Optional[str] = None
-    employee_document_id: Optional[str] = None
-    employee_name: Optional[str] = None
-    period_start: Optional[str] = None
-    period_end: Optional[str] = None
-    total_gross_income: Optional[float] = None
-    income_tax_withheld: Optional[float] = None
+    form_type: str | None = None
+    tax_year: int | None = None
+    nit_employer: str | None = None
+    employer_name: str | None = None
+    employee_document_id: str | None = None
+    employee_name: str | None = None
+    period_start: str | None = None
+    period_end: str | None = None
+    total_gross_income: float | None = None
+    income_tax_withheld: float | None = None
 
     # ── Processing metadata ───────────────────────────────────────────────────
-    extraction_method: Optional[str] = None   # "text" | "ocr" | "hybrid"
-    file_size_bytes: Optional[int] = None
-    page_count: Optional[int] = None
-    processing_time_ms: Optional[int] = None
+    extraction_method: str | None = None  # "text" | "ocr" | "hybrid"
+    file_size_bytes: int | None = None
+    page_count: int | None = None
+    processing_time_ms: int | None = None
 
     # ── JSONB overflow ────────────────────────────────────────────────────────
-    extras: Dict[str, Any] = field(default_factory=dict)
+    extras: dict[str, Any] = field(default_factory=dict)
 
     # ── Vector search chunks ──────────────────────────────────────────────────
-    chunks: List[DocumentChunk] = field(default_factory=list)
+    chunks: list[DocumentChunk] = field(default_factory=list)
 
     def add_chunk(self, chunk: DocumentChunk) -> None:
         self.chunks.append(chunk)
 
     def __setattr__(self, name: str, value: Any) -> None:
         canonical_fields = {
-            "id", "filename", "upload_date", "form_type", "tax_year",
-            "nit_employer", "employer_name", "employee_document_id",
-            "employee_name", "period_start", "period_end", "total_gross_income",
-            "income_tax_withheld", "extraction_method", "file_size_bytes",
-            "page_count", "processing_time_ms", "extras", "chunks"
+            "id",
+            "filename",
+            "upload_date",
+            "form_type",
+            "tax_year",
+            "nit_employer",
+            "employer_name",
+            "employee_document_id",
+            "employee_name",
+            "period_start",
+            "period_end",
+            "total_gross_income",
+            "income_tax_withheld",
+            "extraction_method",
+            "file_size_bytes",
+            "page_count",
+            "processing_time_ms",
+            "extras",
+            "chunks",
         }
         if name in canonical_fields or name.startswith("_"):
             super().__setattr__(name, value)
@@ -101,6 +117,13 @@ class Document(Entity):
             self.extras[name] = value
 
     def __getattr__(self, name: str) -> Any:
-        if name != "extras" and hasattr(self, "extras") and self.extras and name in self.extras:
+        if (
+            name != "extras"
+            and hasattr(self, "extras")
+            and self.extras
+            and name in self.extras
+        ):
             return self.extras[name]
-        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+        raise AttributeError(
+            f"'{self.__class__.__name__}' object has no attribute '{name}'"
+        )

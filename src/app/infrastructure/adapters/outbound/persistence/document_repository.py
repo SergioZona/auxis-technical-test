@@ -1,11 +1,16 @@
-from typing import List, Optional
+from datetime import datetime
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Column, DateTime, Float, Integer, String, func, select
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy import DateTime, Float, Integer, String, func, select
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Mapped, mapped_column
 
-from app.application.ports.outbound.document_repository_port import DocumentRepositoryPort
+from app.application.ports.outbound.document_repository_port import (
+    DocumentRepositoryPort,
+)
 from app.domain.models.document import Document
 from app.infrastructure.adapters.outbound.persistence.database import Base
 
@@ -19,30 +24,32 @@ class DocumentModel(Base):
     __tablename__ = "documents"
 
     # ── Primary key ───────────────────────────────────────────────────────────
-    id = Column(PGUUID(as_uuid=True), primary_key=True)
-    filename = Column(String, nullable=False)
-    upload_date = Column(DateTime, nullable=False, server_default=func.now())
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    filename: Mapped[str] = mapped_column(String, nullable=False)
+    upload_date: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
 
     # ── 10 canonical columns ──────────────────────────────────────────────────
-    form_type = Column(String, nullable=True)
-    tax_year = Column(Integer, nullable=True)
-    nit_employer = Column(String, nullable=True)
-    employer_name = Column(String, nullable=True)
-    employee_document_id = Column(String, nullable=True)
-    employee_name = Column(String, nullable=True)
-    period_start = Column(String, nullable=True)
-    period_end = Column(String, nullable=True)
-    total_gross_income = Column(Float, nullable=True)
-    income_tax_withheld = Column(Float, nullable=True)
+    form_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    tax_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    nit_employer: Mapped[str | None] = mapped_column(String, nullable=True)
+    employer_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    employee_document_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    employee_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    period_start: Mapped[str | None] = mapped_column(String, nullable=True)
+    period_end: Mapped[str | None] = mapped_column(String, nullable=True)
+    total_gross_income: Mapped[float | None] = mapped_column(Float, nullable=True)
+    income_tax_withheld: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # ── Processing metadata ───────────────────────────────────────────────────
-    extraction_method = Column(String, nullable=True)   # "text" | "ocr" | "hybrid"
-    file_size_bytes = Column(Integer, nullable=True)
-    page_count = Column(Integer, nullable=True)
-    processing_time_ms = Column(Integer, nullable=True)
+    extraction_method: Mapped[str | None] = mapped_column(String, nullable=True)
+    file_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    processing_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # ── JSONB overflow (secondary fields + description + anything else) ───────
-    extras = Column(JSONB, nullable=False, default={})
+    extras: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
 
 def _model_to_domain(m: DocumentModel) -> Document:
@@ -73,10 +80,14 @@ class PostgresDocumentRepository(DocumentRepositoryPort):
         self._session = session
 
     async def save(self, document: Document) -> Document:
+        upload_date = document.upload_date
+        if upload_date and upload_date.tzinfo is not None:
+            upload_date = upload_date.replace(tzinfo=None)
+
         model = DocumentModel(
             id=document.id,
             filename=document.filename,
-            upload_date=document.upload_date,
+            upload_date=upload_date,
             form_type=document.form_type,
             tax_year=document.tax_year,
             nit_employer=document.nit_employer,
@@ -97,14 +108,14 @@ class PostgresDocumentRepository(DocumentRepositoryPort):
         await self._session.commit()
         return document
 
-    async def get_by_id(self, document_id: UUID) -> Optional[Document]:
+    async def get_by_id(self, document_id: UUID) -> Document | None:
         result = await self._session.execute(
             select(DocumentModel).where(DocumentModel.id == document_id)
         )
         model = result.scalar_one_or_none()
         return _model_to_domain(model) if model else None
 
-    async def list_all(self, limit: int = 100, offset: int = 0) -> List[Document]:
+    async def list_all(self, limit: int = 100, offset: int = 0) -> list[Document]:
         result = await self._session.execute(
             select(DocumentModel)
             .order_by(DocumentModel.upload_date.desc())

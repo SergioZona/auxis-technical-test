@@ -49,6 +49,3 @@ async def ready(settings: Annotated[Settings, Depends(get_settings)]) -> dict[st
             "service": settings.app_name,
         }
     )
-
-
-

@@ -1,7 +1,7 @@
 import base64
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -63,9 +63,13 @@ Required fields (10 canonical + extras):
 """
 
 _FLOAT_EXTRAS = [
-    "salary_payments", "social_benefits", "other_income_payments",
-    "health_contributions", "pension_contributions",
-    "average_monthly_income", "total_annual_withholding",
+    "salary_payments",
+    "social_benefits",
+    "other_income_payments",
+    "health_contributions",
+    "pension_contributions",
+    "average_monthly_income",
+    "total_annual_withholding",
 ]
 
 
@@ -79,7 +83,7 @@ class LlmAiExtractor(AiExtractorPort):
     def __init__(self, settings: Settings):
         self._settings = settings
 
-    def _get_llm(self):
+    def _get_llm(self) -> Any:
         gemini_key = self._settings.gemini_api_key
         openai_key = self._settings.openai_api_key
 
@@ -90,13 +94,16 @@ class LlmAiExtractor(AiExtractorPort):
                 temperature=0,
             )
         elif openai_key:
-            return ChatOpenAI(
-                model="gpt-4o-mini",
-                openai_api_key=openai_key,
-                temperature=0,
-            )
+            openai_kwargs: dict[str, Any] = {
+                "model": "gpt-4o-mini",
+                "api_key": openai_key,
+                "temperature": 0,
+            }
+            return ChatOpenAI(**openai_kwargs)
         else:
-            raise ValueError("No LLM API keys configured (GEMINI_API_KEY or OPENAI_API_KEY required).")
+            raise ValueError(
+                "No LLM API keys configured (GEMINI_API_KEY or OPENAI_API_KEY required)."
+            )
 
     def _parse_response_content(self, content: Any) -> str:
         if isinstance(content, list):
@@ -116,20 +123,20 @@ class LlmAiExtractor(AiExtractorPort):
                 raw = raw[4:]
         return raw.strip()
 
-    def _coerce_types(self, result: Dict[str, Any]) -> Dict[str, Any]:
+    def _coerce_types(self, result: dict[str, Any]) -> dict[str, Any]:
         """Ensure numeric fields are correct Python types, not strings."""
         float_top = ["total_gross_income", "income_tax_withheld"]
         for f in float_top:
             if result.get(f) is not None:
                 try:
                     result[f] = float(result[f])
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     result[f] = None
 
         if result.get("tax_year") is not None:
             try:
                 result["tax_year"] = int(result["tax_year"])
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 result["tax_year"] = None
 
         extras = result.get("extras") or {}
@@ -137,17 +144,17 @@ class LlmAiExtractor(AiExtractorPort):
             if extras.get(f) is not None:
                 try:
                     extras[f] = float(extras[f])
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     extras[f] = None
         result["extras"] = extras
         return result
 
     async def extract_metadata(
         self,
-        text: Optional[str] = None,
-        image_bytes: Optional[bytes] = None,
-        filename: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        text: str | None = None,
+        image_bytes: bytes | None = None,
+        filename: str | None = None,
+    ) -> dict[str, Any]:
         try:
             llm = self._get_llm()
         except ValueError as exc:
@@ -162,10 +169,12 @@ class LlmAiExtractor(AiExtractorPort):
 
         if image_bytes:
             b64 = base64.b64encode(image_bytes).decode("utf-8")
-            content_list.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{b64}"}
-            })
+            content_list.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{b64}"},
+                }
+            )
 
         try:
             if isinstance(llm, ChatOpenAI):

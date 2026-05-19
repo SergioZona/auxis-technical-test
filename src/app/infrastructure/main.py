@@ -3,6 +3,10 @@ FastAPI application factory.
 This is the infrastructure entry point — wires the DI container, registers
 routers, and installs global exception handlers.
 """
+# Triggering reload to recreate tables
+
+from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,9 +26,13 @@ from app.infrastructure.adapters.inbound.http.health_router import (
 )
 from app.infrastructure.adapters.inbound.http.jsend import error as jsend_error
 from app.infrastructure.adapters.inbound.http.jsend import fail as jsend_fail
-from app.infrastructure.adapters.outbound.persistence.database import Base, engine
+from app.infrastructure.adapters.outbound.persistence.database import Base
+
 # ↓ Must be imported so SQLAlchemy registers the table with Base.metadata BEFORE create_all
-from app.infrastructure.adapters.outbound.persistence.document_repository import DocumentModel  # noqa: F401
+from app.infrastructure.adapters.outbound.persistence.document_repository import (
+    DocumentModel,  # noqa: F401
+)
+from app.infrastructure.config.clients import engine
 from app.infrastructure.config.container import Container
 from app.infrastructure.config.settings import get_settings
 
@@ -40,6 +48,12 @@ def create_app() -> FastAPI:
         ]
     )
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> Any:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        yield
+
     # ── FastAPI app ──────────────────────────────────────────────────────────
     app = FastAPI(
         title=settings.app_name,
@@ -48,14 +62,9 @@ def create_app() -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
+        lifespan=lifespan,
     )
     app.container = container  # type: ignore[attr-defined]
-
-    # ── Startup: Create DB tables ─────────────────────────────────────────────
-    @app.on_event("startup")
-    async def on_startup() -> None:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
 
     # ── CORS ─────────────────────────────────────────────────────────────────
     app.add_middleware(
@@ -68,7 +77,7 @@ def create_app() -> FastAPI:
 
     # ── Routers ───────────────────────────────────────────────────────────────
     api_prefix = f"/api/{settings.api_version}"
-    app.include_router(health_router)                       # /health, /ready, /ping
+    app.include_router(health_router)  # /health, /ready, /ping
     app.include_router(document_router, prefix=api_prefix)  # /api/v1/documents
 
     # ── Global exception handlers (domain → JSend) ────────────────────────────
@@ -118,7 +127,7 @@ def create_app() -> FastAPI:
             content=jsend_error("Internal server error", code=500),
         )
 
-    def custom_openapi() -> dict:
+    def custom_openapi() -> dict[str, Any]:
         """
         Swagger UI 5.x broke file upload rendering when FastAPI / Starlette
         switched from `format: binary` to `contentMediaType: application/octet-stream`.
@@ -136,7 +145,7 @@ def create_app() -> FastAPI:
             routes=app.routes,
         )
 
-        def _fix(obj: dict) -> None:
+        def _fix(obj: dict[str, Any]) -> None:
             if obj.get("contentMediaType") == "application/octet-stream":
                 obj.pop("contentMediaType", None)
                 obj.pop("contentEncoding", None)
@@ -146,7 +155,9 @@ def create_app() -> FastAPI:
                 if isinstance(value, dict):
                     _fix(value)
 
-        for component_schema in schema.get("components", {}).get("schemas", {}).values():
+        for component_schema in (
+            schema.get("components", {}).get("schemas", {}).values()
+        ):
             _fix(component_schema)
 
         app.openapi_schema = schema
@@ -155,7 +166,6 @@ def create_app() -> FastAPI:
     app.openapi = custom_openapi  # type: ignore[method-assign]
 
     return app
-
 
 
 # Entry point for uvicorn: `uvicorn app.infrastructure.main:app`

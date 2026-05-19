@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class AiExtractorPort(ABC):
@@ -8,10 +8,10 @@ class AiExtractorPort(ABC):
     @abstractmethod
     async def extract_metadata(
         self,
-        text: Optional[str] = None,
-        image_bytes: Optional[bytes] = None,
-        filename: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        text: str | None = None,
+        image_bytes: bytes | None = None,
+        filename: str | None = None,
+    ) -> dict[str, Any]:
         """
         Analyze text or page image to extract canonical metadata and page descriptions.
         Returns a dictionary with canonical fields and an optional "description" key.

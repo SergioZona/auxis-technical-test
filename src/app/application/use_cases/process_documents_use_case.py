@@ -1,9 +1,10 @@
 import asyncio
 import logging
-from typing import List, Tuple
 
 from app.application.ports.outbound.document_parser_port import DocumentParserPort
-from app.application.ports.outbound.document_repository_port import DocumentRepositoryPort
+from app.application.ports.outbound.document_repository_port import (
+    DocumentRepositoryPort,
+)
 from app.application.ports.outbound.vector_port import VectorPort
 from app.domain.exceptions.document_errors import FileSizeLimitExceededError
 from app.domain.models.document import Document
@@ -23,8 +24,8 @@ class ProcessDocumentsUseCase:
         self.max_upload_size_mb = max_upload_size_mb
 
     async def execute(
-        self, files: List[Tuple[str, bytes]], repository: DocumentRepositoryPort
-    ) -> List[Document]:
+        self, files: list[tuple[str, bytes]], repository: DocumentRepositoryPort
+    ) -> list[Document]:
         """
         Process multiple uploaded documents.
         Extracts canonical metadata, generates embeddings for chunks, and persists them.
@@ -41,20 +42,21 @@ class ProcessDocumentsUseCase:
 
         # ── Step 1: Parse all files concurrently (pure CPU/IO, no DB session access) ──
         parse_tasks = [
-            self.parser.parse(content, filename)
-            for filename, content in files
+            self.parser.parse(content, filename) for filename, content in files
         ]
         parse_results = await asyncio.gather(*parse_tasks, return_exceptions=True)
 
-        parsed_documents: List[Document] = []
+        parsed_documents: list[Document] = []
         for res in parse_results:
             if isinstance(res, Exception):
                 logger.error(f"Failed to parse document: {res}")
                 raise res
+            if not isinstance(res, Document):
+                raise TypeError(f"Expected Document, got {type(res)}")
             parsed_documents.append(res)
 
         # ── Step 2: Persist sequentially to prevent transaction collisions ──
-        processed_documents: List[Document] = []
+        processed_documents: list[Document] = []
         for doc in parsed_documents:
             saved_doc = await repository.save(doc)
             if saved_doc.chunks:
@@ -64,4 +66,3 @@ class ProcessDocumentsUseCase:
             processed_documents.append(saved_doc)
 
         return processed_documents
-

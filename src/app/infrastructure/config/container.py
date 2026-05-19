@@ -11,7 +11,9 @@ from app.application.use_cases.process_documents_use_case import ProcessDocument
 from app.application.use_cases.query_database_use_case import QueryDatabaseUseCase
 from app.infrastructure.adapters.outbound.ai_extractor import LlmAiExtractor
 from app.infrastructure.adapters.outbound.document_parser import PyMuPDFDocumentParser
-from app.infrastructure.adapters.outbound.langchain_rag_adapter import LangChainRagAdapter
+from app.infrastructure.adapters.outbound.langchain_rag_adapter import (
+    LangChainRagAdapter,
+)
 from app.infrastructure.adapters.outbound.persistence.vector_repository import (
     QdrantVectorRepository,
 )
@@ -43,14 +45,18 @@ class Container(containers.DeclarativeContainer):
         ai_extractor=ai_extractor,
     )
 
-    vector_repository: providers.Singleton[QdrantVectorRepository] = providers.Singleton(
-        QdrantVectorRepository,
+    vector_repository: providers.Singleton[QdrantVectorRepository] = (
+        providers.Singleton(
+            QdrantVectorRepository,
+        )
     )
 
-    langchain_rag_adapter: providers.Singleton[LangChainRagAdapter] = providers.Singleton(
-        LangChainRagAdapter,
-        settings=settings,
-        vector_port=vector_repository,
+    langchain_rag_adapter: providers.Singleton[LangChainRagAdapter] = (
+        providers.Singleton(
+            LangChainRagAdapter,
+            settings=settings,
+            vector_port=vector_repository,
+        )
     )
 
     # document_repository is session-scoped so it's a Factory injected per request
@@ -58,11 +64,13 @@ class Container(containers.DeclarativeContainer):
 
     # ── Use cases (application) ───────────────────────────────────────────────
 
-    process_documents_use_case: providers.Factory[ProcessDocumentsUseCase] = providers.Factory(
-        ProcessDocumentsUseCase,
-        parser=document_parser,
-        vector_db=vector_repository,
-        max_upload_size_mb=settings.provided.max_upload_size_mb,
+    process_documents_use_case: providers.Factory[ProcessDocumentsUseCase] = (
+        providers.Factory(
+            ProcessDocumentsUseCase,
+            parser=document_parser,
+            vector_db=vector_repository,
+            max_upload_size_mb=settings.provided.max_upload_size_mb,
+        )
     )
 
     chat_rag_use_case: providers.Factory[ChatRagUseCase] = providers.Factory(
@@ -70,7 +78,9 @@ class Container(containers.DeclarativeContainer):
         langchain_rag=langchain_rag_adapter,
     )
 
-    query_database_use_case: providers.Factory[QueryDatabaseUseCase] = providers.Factory(
-        QueryDatabaseUseCase,
-        langchain_rag=langchain_rag_adapter,
+    query_database_use_case: providers.Factory[QueryDatabaseUseCase] = (
+        providers.Factory(
+            QueryDatabaseUseCase,
+            langchain_rag=langchain_rag_adapter,
+        )
     )

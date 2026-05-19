@@ -1,5 +1,4 @@
 import abc
-from typing import BinaryIO
 
 from app.domain.models.document import Document
 

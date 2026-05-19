@@ -6,6 +6,7 @@ Secrets → injected at runtime via environment variables (Dokploy / GH Actions)
 """
 
 import os
+from typing import Any
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -69,22 +70,25 @@ class Settings(BaseSettings):
 
     @field_validator("allowed_hosts", mode="before")
     @classmethod
-    def validate_allowed_hosts(cls, v: any) -> list[str]:
+    def validate_allowed_hosts(cls, v: Any) -> list[str]:
         if isinstance(v, str):
             val = v.strip()
             if val.startswith("[") and val.endswith("]"):
                 try:
                     import json
+
                     parsed = json.loads(val)
                     if isinstance(parsed, list):
                         return [str(item).strip() for item in parsed]
                 except Exception:
                     # Strip the brackets and process as comma-separated
                     val = val[1:-1]
-            return [item.strip().strip("'\"") for item in val.split(",") if item.strip()]
+            return [
+                item.strip().strip("'\"") for item in val.split(",") if item.strip()
+            ]
         elif isinstance(v, list):
             return [str(item).strip() for item in v]
-        return v
+        return []
 
     model_config = SettingsConfigDict(
         env_file=_env_file,
