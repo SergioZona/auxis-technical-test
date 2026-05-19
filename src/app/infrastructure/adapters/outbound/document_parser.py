@@ -455,40 +455,63 @@ class PyMuPDFDocumentParser(DocumentParserPort):
 
     def _fallback_employee(self, text: str, res: dict[str, Any]) -> None:
         if not res.get("employee_name"):
-            m = re.search(
-                r"(?:Primer apellido|MORENO)[:\s]*(\w+)\s+(?:Segundo apellido)?[:\s]*(\w+)?\s+(?:Primer nombre)?[:\s]*(\w+)?",
-                text,
-                re.IGNORECASE,
-            )
-            if m:
-                parts = [p for p in [m.group(1), m.group(2), m.group(3)] if p]
+            first_surname = None
+            second_surname = None
+            first_name = None
+
+            m1 = re.search(r"(?:Primer apellido)[:\s]*(\w+)", text, re.IGNORECASE)
+            if m1:
+                first_surname = m1.group(1)
+
+            m2 = re.search(r"Segundo apellido[:\s]*(\w+)", text, re.IGNORECASE)
+            if m2:
+                second_surname = m2.group(1)
+
+            m3 = re.search(r"Primer nombre[:\s]*(\w+)", text, re.IGNORECASE)
+            if m3:
+                first_name = m3.group(1)
+
+            parts = []
+            if first_name:
+                parts.append(first_name)
+            if first_surname:
+                parts.append(first_surname)
+            if second_surname:
+                parts.append(second_surname)
+
+            if parts:
                 res["employee_name"] = " ".join(parts)
+
+    def _fallback_location(self, text: str) -> str | None:
+        target_cities = {
+            "bogota",
+            "bogotá",
+            "medellin",
+            "medellín",
+            "cali",
+            "barranquilla",
+            "cartagena",
+        }
+        for line in text.splitlines():
+            line_str = line.strip()
+            if not line_str:
+                continue
+            words = re.findall(r"\b[a-zA-ZÁÉÍÓÚáéíóú]+\b", line_str)
+            if words:
+                last_word = words[-1]
+                if last_word.lower() in target_cities or (
+                    last_word.isupper() and len(last_word) >= 4
+                ):
+                    return str(last_word)
+        return None
 
     def _fallback_location_dates(
         self, text: str, res: dict[str, Any], ext: dict[str, Any]
     ) -> None:
         if not ext.get("location"):
-            target_cities = {
-                "bogota",
-                "bogotá",
-                "medellin",
-                "medellín",
-                "cali",
-                "barranquilla",
-                "cartagena",
-            }
-            for line in text.splitlines():
-                line_str = line.strip()
-                if not line_str:
-                    continue
-                words = re.findall(r"\b[a-zA-ZÁÉÍÓÚáéíóú]+\b", line_str)
-                if words:
-                    last_word = words[-1]
-                    if last_word.lower() in target_cities or (
-                        last_word.isupper() and len(last_word) >= 4
-                    ):
-                        ext["location"] = last_word
-                        break
+            loc = self._fallback_location(text)
+            if loc:
+                ext["location"] = loc
 
         dates = re.findall(r"\d{4}[-/]\d{2}[-/]\d{2}", text)
         if len(dates) > 0 and not res.get("period_start"):
@@ -602,7 +625,9 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             idx += 1
         return idx
 
-    def _parse_field_form_num(self, sub: list[str], idx: int) -> tuple[int, str | None]:
+    def _parse_single_digit_field(
+        self, sub: list[str], idx: int
+    ) -> tuple[int, str | None]:
         if idx < len(sub) and sub[idx].isdigit():
             return idx + 1, sub[idx]
         return idx, None
@@ -633,13 +658,6 @@ class PyMuPDFDocumentParser(DocumentParserPort):
         if idx < len(sub) and sub[idx].isdigit():
             return idx + 1
         return idx
-
-    def _parse_field_employee_doc(
-        self, sub: list[str], idx: int
-    ) -> tuple[int, str | None]:
-        if idx < len(sub) and sub[idx].isdigit():
-            return idx + 1, sub[idx]
-        return idx, None
 
     def _parse_field_employee_name(
         self, sub: list[str], idx: int
@@ -683,11 +701,11 @@ class PyMuPDFDocumentParser(DocumentParserPort):
     def _parse_form_220_header_fields(self, sub: list[str]) -> dict[str, Any]:
         res: dict[str, Any] = {}
         idx = self._skip_ano_gravable(sub, 0)
-        idx, res["form_number"] = self._parse_field_form_num(sub, idx)
+        idx, res["form_number"] = self._parse_single_digit_field(sub, idx)
         idx, res["nit_employer"] = self._parse_field_nit(sub, idx)
         idx, res["employer_name"] = self._parse_field_employer_name(sub, idx)
         idx = self._skip_unwanted_digit(sub, idx)
-        idx, res["employee_document_id"] = self._parse_field_employee_doc(sub, idx)
+        idx, res["employee_document_id"] = self._parse_single_digit_field(sub, idx)
         idx, res["employee_name"] = self._parse_field_employee_name(sub, idx)
         idx, res["period_start"], res["period_end"] = self._parse_field_dates(sub, idx)
         res["location"] = self._parse_field_location(sub, idx)
