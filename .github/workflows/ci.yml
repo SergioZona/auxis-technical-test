@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+env:
+  PYTHON_VERSION: "3.14"
+  # Non-secret test values — secrets are injected at runtime in real envs
+  APP_ENV: test
+  DATABASE_PASSWORD: testpassword
+  SECRET_KEY: test-secret-ci-only
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  lint:
+    name: "Lint & Format (Ruff)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen --group dev
+      - run: uv run ruff check src/ tests/
+      - run: uv run ruff format --check src/ tests/
+
+  # ─────────────────────────────────────────────────────────────────────────
+  typecheck:
+    name: "Type Check (mypy)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen --group dev
+      - run: uv run mypy src/
+
+  # ─────────────────────────────────────────────────────────────────────────
+  unit-tests:
+    name: "Unit Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen --group dev
+      - run: uv run pytest tests/unit/ -v --cov=src --cov-report=xml --cov-fail-under=80
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  # ─────────────────────────────────────────────────────────────────────────
+  contract-tests:
+    name: "Contract Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen --group dev
+      - run: uv run pytest tests/contract/ -v
+
+  # ─────────────────────────────────────────────────────────────────────────
+  integration-tests:
+    name: "Integration Tests"
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: app_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_HOST: localhost
+      DATABASE_NAME: app_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen --group dev
+      - run: uv run pytest tests/integration/ -v
+
+  # ─────────────────────────────────────────────────────────────────────────
+  architecture-tests:
+    name: "Architecture Boundary Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen --group dev
+      - run: uv run pytest tests/architecture/ -v
+      - run: uv run lint-imports
+
+  # ─────────────────────────────────────────────────────────────────────────
+  security:
+    name: "Security Scan (bandit + pip-audit)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen --group dev
+      - run: uv run bandit -r src/ -ll
+      - run: uv run pip-audit
+
+  # ─────────────────────────────────────────────────────────────────────────
+  sonar:
+    name: "SonarQube Analysis"
+    needs: [unit-tests]
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better analysis relevancy
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+      - uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}

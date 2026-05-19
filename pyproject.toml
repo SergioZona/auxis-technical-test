@@ -1,0 +1,136 @@
+[project]
+name = "hexagonal-backend-template"
+version = "1.0.0"
+description = "Production-ready Python hexagonal architecture template"
+readme = "README.md"
+requires-python = ">=3.14"
+license = { text = "MIT" }
+authors = [{ name = "Your Name", email = "you@example.com" }]
+keywords = ["hexagonal", "ddd", "fastapi", "template"]
+
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.30.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "dependency-injector>=4.44.0",
+    "structlog>=24.4.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "httpx>=0.28.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "import-linter>=2.1.0",
+    "bandit[toml]>=1.8.0",
+    "pip-audit>=2.7.0",
+    "pre-commit>=4.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/app"]
+
+# ---------------------------------------------------------------------------
+# Ruff — lint + format (replaces flake8, isort, black)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "SIM", "TCH", "S"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # allow assert in tests
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ruff.lint.flake8-type-checking]
+exempt-modules = ["app.domain.models", "app.application", "typing", "datetime", "uuid"]
+runtime-evaluated-decorators = [
+    "fastapi.APIRouter.get",
+    "fastapi.APIRouter.post",
+    "fastapi.APIRouter.patch",
+    "fastapi.APIRouter.delete",
+    "dependency_injector.wiring.inject",
+]
+
+# ---------------------------------------------------------------------------
+# Mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.14"
+strict = true
+ignore_missing_imports = true
+exclude = ["tests/"]
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+# ---------------------------------------------------------------------------
+# Coverage
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["src/app"]
+omit = ["*/tests/*", "*/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80
+
+# ---------------------------------------------------------------------------
+# Bandit — security linting
+# ---------------------------------------------------------------------------
+[tool.bandit]
+targets = ["src/"]
+skips = ["B101"]  # allow assert
+
+# ---------------------------------------------------------------------------
+# Import Linter — architectural boundary enforcement
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_packages = ["app"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Domain has no upward imports"
+type = "forbidden"
+source_modules = ["app.domain"]
+forbidden_modules = ["app.application", "app.infrastructure"]
+
+[[tool.importlinter.contracts]]
+name = "Application has no infrastructure imports"
+type = "forbidden"
+source_modules = ["app.application"]
+forbidden_modules = ["app.infrastructure"]
+
+[[tool.importlinter.contracts]]
+name = "Use cases only use ports and domain"
+type = "layers"
+layers = [
+    "app.infrastructure",
+    "app.application",
+    "app.domain",
+]

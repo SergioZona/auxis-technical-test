@@ -1,0 +1,140 @@
+name: CD
+
+on:
+  # Auto-deploy DEV on every successful CI run on main
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+  # Auto-deploy UAT from release branches
+  push:
+    branches:
+      - "release/uat"
+
+  # Auto-deploy PROD on published GitHub Releases
+  release:
+    types: [published]
+
+  # Manual deploy with full control
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [dev, uat, prod]
+      version:
+        description: "Version to deploy (e.g. 1.2.3). Defaults to SHA."
+        required: false
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  determine-env:
+    name: "Determine Environment & Version"
+    runs-on: ubuntu-latest
+    outputs:
+      app_env: ${{ steps.resolve.outputs.app_env }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Resolve target environment and version
+        id: resolve
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            APP_ENV="${{ github.event.inputs.environment }}"
+            VERSION="${{ github.event.inputs.version || github.sha }}"
+          elif [[ "${{ github.ref }}" == "refs/heads/release/uat" ]]; then
+            APP_ENV="uat"
+            VERSION="${GITHUB_SHA::8}"
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
+            APP_ENV="prod"
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            APP_ENV="dev"
+            VERSION="${GITHUB_SHA::8}"
+          fi
+          echo "app_env=$APP_ENV" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Resolved: env=$APP_ENV version=$VERSION"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  build:
+    name: "Build Docker Image"
+    needs: determine-env
+    runs-on: ubuntu-latest
+    env:
+      APP_ENV: ${{ needs.determine-env.outputs.app_env }}
+      VERSION: ${{ needs.determine-env.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "[PLACEHOLDER] Build Docker image"
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo " Building image"
+          echo " ENV:     $APP_ENV"
+          echo " VERSION: $VERSION"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          # TODO: Replace with your registry and build commands:
+          # docker build \
+          #   --env-file src/env/${APP_ENV^^}.env \
+          #   -t your-registry/hexagonal-app:$VERSION \
+          #   -t your-registry/hexagonal-app:$APP_ENV-latest \
+          #   .
+          # docker push your-registry/hexagonal-app:$VERSION
+
+  # ─────────────────────────────────────────────────────────────────────────
+  deploy-dev:
+    name: "Deploy → DEV"
+    needs: [determine-env, build]
+    if: needs.determine-env.outputs.app_env == 'dev'
+    runs-on: ubuntu-latest
+    environment: dev
+    env:
+      VERSION: ${{ needs.determine-env.outputs.version }}
+    steps:
+      - name: "[PLACEHOLDER] Deploy to DEV"
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo " Deploying version $VERSION to DEV"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          # TODO: Add your deploy command here, e.g.:
+          # - Dokploy API call to trigger redeploy
+          # - kubectl set image deployment/app app=registry/app:$VERSION
+          # - fly deploy --image registry/app:$VERSION
+
+  # ─────────────────────────────────────────────────────────────────────────
+  deploy-uat:
+    name: "Deploy → UAT"
+    needs: [determine-env, build]
+    if: needs.determine-env.outputs.app_env == 'uat'
+    runs-on: ubuntu-latest
+    environment: uat
+    env:
+      VERSION: ${{ needs.determine-env.outputs.version }}
+    steps:
+      - name: "[PLACEHOLDER] Deploy to UAT"
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo " Deploying version $VERSION to UAT"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          # TODO: Add UAT deploy command
+
+  # ─────────────────────────────────────────────────────────────────────────
+  deploy-prod:
+    name: "Deploy → PROD"
+    needs: [determine-env, build]
+    if: needs.determine-env.outputs.app_env == 'prod'
+    runs-on: ubuntu-latest
+    environment: prod   # ← requires manual approval in GitHub repo settings
+    env:
+      VERSION: ${{ needs.determine-env.outputs.version }}
+    steps:
+      - name: "[PLACEHOLDER] Deploy to PROD"
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo " Deploying version $VERSION to PROD"
+          echo " (requires manual approval via GitHub environment protection)"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          # TODO: Add PROD deploy command
+          # Secrets available via: ${{ secrets.DEPLOY_TOKEN }} etc.

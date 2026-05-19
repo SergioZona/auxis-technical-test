@@ -1,0 +1,30 @@
+# .coveragerc — Coverage.py configuration
+# This mirrors [tool.coverage] in pyproject.toml.
+# Useful for IDE plugins (e.g. VS Code Coverage Gutters) that read this file directly.
+
+[run]
+source = src/app
+omit =
+    */tests/*
+    */__init__.py
+    */migrations/*
+branch = true
+
+[report]
+show_missing = true
+fail_under = 80
+exclude_lines =
+    # Don't flag abstract methods as uncovered
+    @abstractmethod
+    # Don't flag pragma: no cover lines
+    pragma: no cover
+    # Don't flag type-checking-only blocks
+    if TYPE_CHECKING:
+    # Don't flag NotImplementedError stubs (placeholder adapters)
+    raise NotImplementedError
+
+[html]
+directory = htmlcov
+
+[xml]
+output = coverage.xml

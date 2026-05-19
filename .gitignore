@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# UV / Virtual environments
+.venv/
+venv/
+.uv/
+
+# Environment files
+# src/env/.env is the LOCAL DEFAULT — contains secrets for local dev, NEVER commit it
+src/env/.env
+# The named env files (DEV.env, TEST.env, UAT.env, PROD.env) are committed
+# because they contain config only, never secrets.
+*.local.env
+.env
+.env.*
+
+# Local override files (gitignored by convention)
+*.local.md
+*.local.json
+.antigravity/ANTIGRAVITY.local.md
+.antigravity/settings.local.json
+
+# Coverage & test artifacts
+.coverage
+coverage.xml
+coverage/
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.import_linter_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# Database files (should never be in repo)
+*.db
+*.sqlite3
+# Added by code-review-graph
+.code-review-graph/
