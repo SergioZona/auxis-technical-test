@@ -459,7 +459,7 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             second_surname = None
             first_name = None
 
-            m1 = re.search(r"(?:Primer apellido)[:\s]*(\w+)", text, re.IGNORECASE)
+            m1 = re.search(r"Primer apellido[:\s]*(\w+)", text, re.IGNORECASE)
             if m1:
                 first_surname = m1.group(1)
 
@@ -492,17 +492,13 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             "barranquilla",
             "cartagena",
         }
-        for line in text.splitlines():
-            line_str = line.strip()
-            if not line_str:
-                continue
-            words = re.findall(r"\b[a-zA-ZÁÉÍÓÚáéíóú]+\b", line_str)
-            if words:
-                last_word = words[-1]
-                if last_word.lower() in target_cities or (
-                    last_word.isupper() and len(last_word) >= 4
-                ):
-                    return str(last_word)
+        words = re.findall(r"\b[a-zA-ZÁÉÍÓÚáéíóú]+\b", text.strip())
+        if words:
+            last_word = words[-1]
+            if last_word.lower() in target_cities or (
+                last_word.isupper() and len(last_word) >= 4
+            ):
+                return str(last_word)
         return None
 
     def _fallback_location_dates(

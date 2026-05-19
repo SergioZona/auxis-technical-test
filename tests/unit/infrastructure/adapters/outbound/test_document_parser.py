@@ -131,3 +131,57 @@ async def test_parse_scanned_pdf_ai_fallback_success(
     mock_ai_extractor.extract_metadata.assert_called()
     # AI is called for page extraction (image) + reconcile (always AI-first)
     assert mock_ai_extractor.extract_metadata.call_count >= 1
+
+
+async def test_parse_pdf_triggering_fallbacks(
+    parser: PyMuPDFDocumentParser,
+    mock_ai_extractor: AsyncMock,
+) -> None:
+    # Mock AI extractor to return empty to force fallbacks to run
+    mock_ai_extractor.extract_metadata.return_value = {}
+
+    text_lines = [
+        "Número de formulario: 987654321",
+        "Razón social: EMPRESA S.A.S. NIT 800.123.456-7",
+        "NIT: 800.123.456-7",
+        "Número de identificación: 10203040",
+        "Primer apellido: GONZALEZ",
+        "Segundo apellido: RODRIGUEZ",
+        "Primer nombre: PEDRO",
+        "Año gravable: 2024",
+        "Formulario 210",
+        "2024-01-15",
+        "2024-12-15",
+        "Total ingresos brutos: $120.000.000",
+        "Valor de la retención en la fuente: $12.000.000",
+        "Pagos por salarios: $100.000.000",
+        "Pagos por prestaciones sociales: $20.000.000",
+        "Otros pagos: $0",
+        "Aportes obligatorios por salud: $4.000.000",
+        "Aportes obligatorios a fondos de pensiones: $4.000.000",
+        "Ingreso laboral promedio: $10.000.000",
+        "Total retención año gravable: $12.000.000",
+        "BOGOTÁ",
+    ]
+    pdf_bytes = create_text_pdf(text_lines)
+
+    doc = await parser.parse(pdf_bytes, "Fallback_Document.pdf")
+
+    assert isinstance(doc, Document)
+    assert doc.form_type == "210"
+    assert doc.tax_year == 2024
+    assert doc.nit_employer == "800.123.456-7"
+    assert doc.employer_name == "EMPRESA S.A.S."
+    assert doc.employee_document_id == "10203040"
+    assert doc.employee_name == "PEDRO GONZALEZ RODRIGUEZ"
+    assert doc.period_start == "2024-01-15"
+    assert doc.period_end == "2024-12-15"
+    assert doc.total_gross_income == 120000000.0
+    assert doc.income_tax_withheld == 12000000.0
+    assert doc.extras.get("location") == "BOGOTÁ"
+    assert doc.extras.get("salary_payments") == 100000000.0
+    assert doc.extras.get("social_benefits") == 20000000.0
+    assert doc.extras.get("health_contributions") == 4000000.0
+    assert doc.extras.get("pension_contributions") == 4000000.0
+    assert doc.extras.get("average_monthly_income") == 10000000.0
+    assert doc.extras.get("total_annual_withholding") == 12000000.0
