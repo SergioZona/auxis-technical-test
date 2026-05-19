@@ -154,6 +154,44 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             logger.warning(f"OCR failed on page {page_num}: {exc}")
             return ""
 
+    async def _process_scanned_page(
+        self, page_num: int, filename: str, ocr_text: str, png_bytes: bytes
+    ) -> tuple[dict[str, Any], str]:
+        logger.info(f"{filename}: Page {page_num} → scanned. Running OCR + AI.")
+        ai_data = await self._ai_extractor.extract_metadata(
+            text=ocr_text or None,
+            image_bytes=png_bytes,
+            filename=filename,
+        )
+        desc = ai_data.get("description", "")
+        extracted_text = ocr_text or ""
+        if desc:
+            extracted_text += f"\n\n[AI Visual Analysis]:\n{desc}"
+        return ai_data, extracted_text
+
+    async def _process_mixed_page(
+        self,
+        page_num: int,
+        filename: str,
+        ocr_text: str,
+        selectable_text: str,
+        png_bytes: bytes,
+    ) -> tuple[dict[str, Any], str]:
+        logger.info(f"{filename}: Page {page_num} → mixed. Running OCR + AI.")
+        combined_text = selectable_text
+        if ocr_text and ocr_text not in selectable_text:
+            combined_text = f"{selectable_text}\n\n[OCR Supplement]:\n{ocr_text}"
+        ai_data = await self._ai_extractor.extract_metadata(
+            text=combined_text,
+            image_bytes=png_bytes,
+            filename=filename,
+        )
+        desc = ai_data.get("description", "")
+        extracted_text = combined_text
+        if desc:
+            extracted_text += f"\n\n[AI Visual Analysis]:\n{desc}"
+        return ai_data, extracted_text
+
     async def _process_page(
         self, page: fitz.Page, p_info: dict[str, Any], filename: str
     ) -> tuple[str, str, dict[str, Any], str]:
@@ -163,7 +201,7 @@ class PyMuPDFDocumentParser(DocumentParserPort):
 
         tables_text = self._extract_tables_md(page, page_num)
         ocr_text = ""
-        ai_data = {}
+        ai_data: dict[str, Any] = {}
         extracted_text = ""
 
         if classification in ("scanned", "mixed"):
@@ -172,32 +210,13 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             ocr_text = self._ocr_page(png_bytes, page_num)
 
             if classification == "scanned":
-                logger.info(f"{filename}: Page {page_num} → scanned. Running OCR + AI.")
-                ai_data = await self._ai_extractor.extract_metadata(
-                    text=ocr_text or None,
-                    image_bytes=png_bytes,
-                    filename=filename,
+                ai_data, extracted_text = await self._process_scanned_page(
+                    page_num, filename, ocr_text, png_bytes
                 )
-                desc = ai_data.get("description", "")
-                extracted_text = ocr_text or ""
-                if desc:
-                    extracted_text += f"\n\n[AI Visual Analysis]:\n{desc}"
             else:
-                logger.info(f"{filename}: Page {page_num} → mixed. Running OCR + AI.")
-                combined_text = selectable_text
-                if ocr_text and ocr_text not in selectable_text:
-                    combined_text = (
-                        f"{selectable_text}\n\n[OCR Supplement]:\n{ocr_text}"
-                    )
-                ai_data = await self._ai_extractor.extract_metadata(
-                    text=combined_text,
-                    image_bytes=png_bytes,
-                    filename=filename,
+                ai_data, extracted_text = await self._process_mixed_page(
+                    page_num, filename, ocr_text, selectable_text, png_bytes
                 )
-                desc = ai_data.get("description", "")
-                extracted_text = combined_text
-                if desc:
-                    extracted_text += f"\n\n[AI Visual Analysis]:\n{desc}"
         else:
             extracted_text = selectable_text
 
@@ -260,6 +279,30 @@ class PyMuPDFDocumentParser(DocumentParserPort):
                     extras[k] = v
         return reconciled, extras
 
+    def _apply_form_220_pos_mapping(
+        self,
+        full_text: str,
+        filename: str,
+        reconciled: dict[str, Any],
+        extras: dict[str, Any],
+    ) -> None:
+        temp_doc = Document(filename=filename)
+        temp_doc.form_type = "220"
+        try:
+            self._map_form_220(full_text, temp_doc)
+            for k in reconciled:
+                if reconciled[k] is None:
+                    val = getattr(temp_doc, k, None)
+                    if val is not None:
+                        reconciled[k] = val
+
+            # Merge temp_doc extras if any
+            for k, v in temp_doc.extras.items():
+                if v is not None and extras.get(k) is None:
+                    extras[k] = v
+        except Exception as exc:
+            logger.warning(f"Form 220 positional mapping failed: {exc}")
+
     def _reconcile_step_form_220(
         self,
         full_text: str,
@@ -272,26 +315,15 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             or "form 220" in full_text.lower()
             or reconciled.get("form_type") == "220"
         )
-        if is_form_220:
-            if not reconciled.get("form_type"):
-                reconciled["form_type"] = "220"
-            if reconciled.get("total_gross_income") is None:
-                temp_doc = Document(filename=filename)
-                temp_doc.form_type = "220"
-                try:
-                    self._map_form_220(full_text, temp_doc)
-                    for k in reconciled:
-                        if reconciled[k] is None:
-                            val = getattr(temp_doc, k, None)
-                            if val is not None:
-                                reconciled[k] = val
+        if not is_form_220:
+            return reconciled, extras
 
-                    # Merge temp_doc extras if any
-                    for k, v in temp_doc.extras.items():
-                        if v is not None and extras.get(k) is None:
-                            extras[k] = v
-                except Exception as exc:
-                    logger.warning(f"Form 220 positional mapping failed: {exc}")
+        if not reconciled.get("form_type"):
+            reconciled["form_type"] = "220"
+
+        if reconciled.get("total_gross_income") is None:
+            self._apply_form_220_pos_mapping(full_text, filename, reconciled, extras)
+
         return reconciled, extras
 
     async def _reconcile_metadata_node(self, state: ParserState) -> dict[str, Any]:
@@ -363,7 +395,7 @@ class PyMuPDFDocumentParser(DocumentParserPort):
 
     # ── Helpers ────────────────────────────────────────────────────────────
 
-    def _fallback_identifiers(
+    def _fallback_form_info(
         self, text: str, res: dict[str, Any], ext: dict[str, Any]
     ) -> None:
         if not ext.get("form_number"):
@@ -387,6 +419,7 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             if m:
                 res["tax_year"] = int(m.group(1))
 
+    def _fallback_employer_info(self, text: str, res: dict[str, Any]) -> None:
         if not res.get("employer_name"):
             m = re.search(
                 r"(?:Razón social|Razon social)[:\s]+([^\n]+)",
@@ -403,6 +436,7 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             if m:
                 res["nit_employer"] = m.group(1).strip()
 
+    def _fallback_employee_id(self, text: str, res: dict[str, Any]) -> None:
         if not res.get("employee_document_id"):
             m = re.search(
                 r"(?:Número de identificación|No.*identificacion)[:\s]*([\d.]+)",
@@ -411,6 +445,13 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             )
             if m:
                 res["employee_document_id"] = m.group(1).strip()
+
+    def _fallback_identifiers(
+        self, text: str, res: dict[str, Any], ext: dict[str, Any]
+    ) -> None:
+        self._fallback_form_info(text, res, ext)
+        self._fallback_employer_info(text, res)
+        self._fallback_employee_id(text, res)
 
     def _fallback_employee(self, text: str, res: dict[str, Any]) -> None:
         if not res.get("employee_name"):
@@ -427,13 +468,27 @@ class PyMuPDFDocumentParser(DocumentParserPort):
         self, text: str, res: dict[str, Any], ext: dict[str, Any]
     ) -> None:
         if not ext.get("location"):
-            m = re.search(
-                r"(?:Bogotá|Medellín|Cali|Barranquilla|Cartagena|[A-ZÁÉÍÓÚ]{4,})\s*$",
-                text,
-                re.MULTILINE,
-            )
-            if m:
-                ext["location"] = m.group(0).strip()
+            target_cities = {
+                "bogota",
+                "bogotá",
+                "medellin",
+                "medellín",
+                "cali",
+                "barranquilla",
+                "cartagena",
+            }
+            for line in text.splitlines():
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                words = re.findall(r"\b[a-zA-ZÁÉÍÓÚáéíóú]+\b", line_str)
+                if words:
+                    last_word = words[-1]
+                    if last_word.lower() in target_cities or (
+                        last_word.isupper() and len(last_word) >= 4
+                    ):
+                        ext["location"] = last_word
+                        break
 
         dates = re.findall(r"\d{4}[-/]\d{2}[-/]\d{2}", text)
         if len(dates) > 0 and not res.get("period_start"):
@@ -540,18 +595,19 @@ class PyMuPDFDocumentParser(DocumentParserPort):
                 return int(m.group(1))
         return None
 
-    def _parse_form_220_header_fields(self, sub: list[str]) -> dict[str, Any]:
-        res: dict[str, Any] = {}
-        idx = 0
+    def _skip_ano_gravable(self, sub: list[str], idx: int) -> int:
         while idx < len(sub) and (
             "año gravable" in sub[idx].lower() or "ano gravable" in sub[idx].lower()
         ):
             idx += 1
+        return idx
 
+    def _parse_field_form_num(self, sub: list[str], idx: int) -> tuple[int, str | None]:
         if idx < len(sub) and sub[idx].isdigit():
-            res["form_number"] = sub[idx]
-            idx += 1
+            return idx + 1, sub[idx]
+        return idx, None
 
+    def _parse_field_nit(self, sub: list[str], idx: int) -> tuple[int, str | None]:
         nit_val = None
         if idx < len(sub) and sub[idx].isdigit():
             nit_val = sub[idx]
@@ -563,21 +619,31 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             idx += 1
 
         if nit_val and dv_val:
-            res["nit_employer"] = f"{nit_val}-{dv_val}"
-        elif nit_val:
-            res["nit_employer"] = nit_val
+            return idx, f"{nit_val}-{dv_val}"
+        return idx, nit_val
 
+    def _parse_field_employer_name(
+        self, sub: list[str], idx: int
+    ) -> tuple[int, str | None]:
         if idx < len(sub) and not sub[idx].isdigit():
-            res["employer_name"] = sub[idx]
-            idx += 1
+            return idx + 1, sub[idx]
+        return idx, None
 
+    def _skip_unwanted_digit(self, sub: list[str], idx: int) -> int:
         if idx < len(sub) and sub[idx].isdigit():
-            idx += 1
+            return idx + 1
+        return idx
 
+    def _parse_field_employee_doc(
+        self, sub: list[str], idx: int
+    ) -> tuple[int, str | None]:
         if idx < len(sub) and sub[idx].isdigit():
-            res["employee_document_id"] = sub[idx]
-            idx += 1
+            return idx + 1, sub[idx]
+        return idx, None
 
+    def _parse_field_employee_name(
+        self, sub: list[str], idx: int
+    ) -> tuple[int, str | None]:
         name_parts = []
         while idx < len(sub):
             val = sub[idx]
@@ -589,10 +655,14 @@ class PyMuPDFDocumentParser(DocumentParserPort):
         if len(name_parts) >= 3:
             lasts = name_parts[:2]
             firsts = name_parts[2:]
-            res["employee_name"] = " ".join(firsts + lasts)
-        elif name_parts:
-            res["employee_name"] = " ".join(name_parts)
+            return idx, " ".join(firsts + lasts)
+        if name_parts:
+            return idx, " ".join(name_parts)
+        return idx, None
 
+    def _parse_field_dates(
+        self, sub: list[str], idx: int
+    ) -> tuple[int, str | None, str | None]:
         date_ints: list[str] = []
         while idx < len(sub) and len(date_ints) < 9:
             if sub[idx].isdigit() and len(sub[idx]) <= 4:
@@ -600,17 +670,30 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             idx += 1
 
         if len(date_ints) >= 6:
-            res["period_start"] = (
-                f"{date_ints[0]}-{date_ints[1].zfill(2)}-{date_ints[2].zfill(2)}"
-            )
-            res["period_end"] = (
-                f"{date_ints[3]}-{date_ints[4].zfill(2)}-{date_ints[5].zfill(2)}"
-            )
+            p_start = f"{date_ints[0]}-{date_ints[1].zfill(2)}-{date_ints[2].zfill(2)}"
+            p_end = f"{date_ints[3]}-{date_ints[4].zfill(2)}-{date_ints[5].zfill(2)}"
+            return idx, p_start, p_end
+        return idx, None, None
 
+    def _parse_field_location(self, sub: list[str], idx: int) -> str | None:
         if idx < len(sub) and not sub[idx].startswith("$") and not sub[idx].isdigit():
-            res["location"] = sub[idx]
+            return sub[idx]
+        return None
 
-        return res
+    def _parse_form_220_header_fields(self, sub: list[str]) -> dict[str, Any]:
+        res: dict[str, Any] = {}
+        idx = self._skip_ano_gravable(sub, 0)
+        idx, res["form_number"] = self._parse_field_form_num(sub, idx)
+        idx, res["nit_employer"] = self._parse_field_nit(sub, idx)
+        idx, res["employer_name"] = self._parse_field_employer_name(sub, idx)
+        idx = self._skip_unwanted_digit(sub, idx)
+        idx, res["employee_document_id"] = self._parse_field_employee_doc(sub, idx)
+        idx, res["employee_name"] = self._parse_field_employee_name(sub, idx)
+        idx, res["period_start"], res["period_end"] = self._parse_field_dates(sub, idx)
+        res["location"] = self._parse_field_location(sub, idx)
+
+        # Cleanup None values
+        return {k: v for k, v in res.items() if v is not None}
 
     def _apply_form_220_amounts(self, sub: list[str], doc: Document) -> None:
         amounts = []
@@ -631,6 +714,29 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             doc.income_tax_withheld = amounts[24]
             doc.total_annual_withholding = amounts[26]
 
+    def _find_header_index(self, lines: list[str]) -> int:
+        for i, line in enumerate(lines):
+            if "certificado de ingresos y retenciones" in line.lower():
+                return i
+        return -1
+
+    def _apply_header_and_amounts(self, sub: list[str], doc: Document) -> None:
+        header_fields = self._parse_form_220_header_fields(sub)
+        fields = [
+            "form_number",
+            "nit_employer",
+            "employer_name",
+            "employee_document_id",
+            "employee_name",
+            "period_start",
+            "period_end",
+            "location",
+        ]
+        for field in fields:
+            if field in header_fields:
+                setattr(doc, field, header_fields[field])
+        self._apply_form_220_amounts(sub, doc)
+
     def _map_form_220(self, text: str, doc: Document) -> None:
         """Sequential line-by-line parser for Form 220."""
         lines = self._clean_form_220_lines(text)
@@ -638,32 +744,6 @@ class PyMuPDFDocumentParser(DocumentParserPort):
         if tax_year:
             doc.tax_year = tax_year
 
-        header_idx = -1
-        for i, line in enumerate(lines):
-            if "certificado de ingresos y retenciones" in line.lower():
-                header_idx = i
-                break
-
+        header_idx = self._find_header_index(lines)
         if header_idx != -1:
-            sub = lines[header_idx + 1 :]
-            header_fields = self._parse_form_220_header_fields(sub)
-
-            # Map header fields to doc
-            if "form_number" in header_fields:
-                doc.form_number = header_fields["form_number"]
-            if "nit_employer" in header_fields:
-                doc.nit_employer = header_fields["nit_employer"]
-            if "employer_name" in header_fields:
-                doc.employer_name = header_fields["employer_name"]
-            if "employee_document_id" in header_fields:
-                doc.employee_document_id = header_fields["employee_document_id"]
-            if "employee_name" in header_fields:
-                doc.employee_name = header_fields["employee_name"]
-            if "period_start" in header_fields:
-                doc.period_start = header_fields["period_start"]
-            if "period_end" in header_fields:
-                doc.period_end = header_fields["period_end"]
-            if "location" in header_fields:
-                doc.location = header_fields["location"]
-
-            self._apply_form_220_amounts(sub, doc)
+            self._apply_header_and_amounts(lines[header_idx + 1 :], doc)

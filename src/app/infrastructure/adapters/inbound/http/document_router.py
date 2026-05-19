@@ -34,6 +34,37 @@ class DbQueryRequest(BaseModel):
     query: str
 
 
+def _map_document_to_dict(doc: Any) -> dict[str, Any]:
+    extras = doc.extras or {}
+    return {
+        "id": str(doc.id),
+        "filename": doc.filename,
+        "upload_date": doc.upload_date.isoformat() if doc.upload_date else None,
+        "extraction_method": doc.extraction_method,
+        "form_type": doc.form_type,
+        "form_number": extras.get("form_number"),
+        "tax_year": doc.tax_year,
+        "nit_employer": doc.nit_employer,
+        "employer_name": doc.employer_name,
+        "employee_document_id": doc.employee_document_id,
+        "employee_name": doc.employee_name,
+        "location": extras.get("location"),
+        "period_start": doc.period_start,
+        "period_end": doc.period_end,
+        "total_gross_income": doc.total_gross_income,
+        "salary_payments": extras.get("salary_payments"),
+        "social_benefits": extras.get("social_benefits"),
+        "other_income_payments": extras.get("other_income_payments"),
+        "health_contributions": extras.get("health_contributions"),
+        "pension_contributions": extras.get("pension_contributions"),
+        "average_monthly_income": extras.get("average_monthly_income"),
+        "income_tax_withheld": doc.income_tax_withheld,
+        "total_annual_withholding": extras.get("total_annual_withholding"),
+        "chunks_processed": len(doc.chunks) if doc.chunks else 0,
+        "others": extras,
+    }
+
+
 @router.post(
     "/documents/upload",
     responses={
@@ -92,48 +123,7 @@ async def upload_documents(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
-    res = [
-        {
-            "id": str(doc.id),
-            "filename": doc.filename,
-            "extraction_method": doc.extraction_method,
-            "form_type": doc.form_type,
-            "form_number": doc.extras.get("form_number") if doc.extras else None,
-            "tax_year": doc.tax_year,
-            "nit_employer": doc.nit_employer,
-            "employer_name": doc.employer_name,
-            "employee_document_id": doc.employee_document_id,
-            "employee_name": doc.employee_name,
-            "location": doc.extras.get("location") if doc.extras else None,
-            "period_start": doc.period_start,
-            "period_end": doc.period_end,
-            "total_gross_income": doc.total_gross_income,
-            "salary_payments": doc.extras.get("salary_payments")
-            if doc.extras
-            else None,
-            "social_benefits": doc.extras.get("social_benefits")
-            if doc.extras
-            else None,
-            "other_income_payments": doc.extras.get("other_income_payments")
-            if doc.extras
-            else None,
-            "health_contributions": doc.extras.get("health_contributions")
-            if doc.extras
-            else None,
-            "pension_contributions": doc.extras.get("pension_contributions")
-            if doc.extras
-            else None,
-            "average_monthly_income": doc.extras.get("average_monthly_income")
-            if doc.extras
-            else None,
-            "income_tax_withheld": doc.income_tax_withheld,
-            "total_annual_withholding": doc.extras.get("total_annual_withholding")
-            if doc.extras
-            else None,
-            "chunks_processed": len(doc.chunks),
-        }
-        for doc in documents
-    ]
+    res = [_map_document_to_dict(doc) for doc in documents]
     return success(res)
 
 
@@ -149,49 +139,7 @@ async def list_documents(
     """
     repository = PostgresDocumentRepository(session)
     docs = await repository.list_all(limit=limit, offset=offset)
-    res = [
-        {
-            "id": str(doc.id),
-            "filename": doc.filename,
-            "upload_date": doc.upload_date.isoformat() if doc.upload_date else None,
-            "form_type": doc.form_type,
-            "form_number": doc.extras.get("form_number") if doc.extras else None,
-            "tax_year": doc.tax_year,
-            "nit_employer": doc.nit_employer,
-            "employer_name": doc.employer_name,
-            "employee_document_id": doc.employee_document_id,
-            "employee_name": doc.employee_name,
-            "location": doc.extras.get("location") if doc.extras else None,
-            "period_start": doc.period_start,
-            "period_end": doc.period_end,
-            "total_gross_income": doc.total_gross_income,
-            "salary_payments": doc.extras.get("salary_payments")
-            if doc.extras
-            else None,
-            "social_benefits": doc.extras.get("social_benefits")
-            if doc.extras
-            else None,
-            "other_income_payments": doc.extras.get("other_income_payments")
-            if doc.extras
-            else None,
-            "health_contributions": doc.extras.get("health_contributions")
-            if doc.extras
-            else None,
-            "pension_contributions": doc.extras.get("pension_contributions")
-            if doc.extras
-            else None,
-            "average_monthly_income": doc.extras.get("average_monthly_income")
-            if doc.extras
-            else None,
-            "income_tax_withheld": doc.income_tax_withheld,
-            "total_annual_withholding": doc.extras.get("total_annual_withholding")
-            if doc.extras
-            else None,
-            "extraction_method": doc.extraction_method,
-            "others": doc.extras,
-        }
-        for doc in docs
-    ]
+    res = [_map_document_to_dict(doc) for doc in docs]
     return success(res)
 
 
