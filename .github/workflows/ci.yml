@@ -2,8 +2,6 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop]
-  pull_request:
     branches: ["**"]
 
 env:
@@ -126,7 +124,6 @@ jobs:
   sonar:
     name: "SonarQube Analysis"
     needs: [unit-tests]
-    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
