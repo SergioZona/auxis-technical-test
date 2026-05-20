@@ -1,12 +1,12 @@
 [project]
-name = "hexagonal-backend-template"
+name = "auxis-technical-test"
 version = "1.0.0"
-description = "Production-ready Python hexagonal architecture template"
+description = "Production-ready RAG"
 readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MIT" }
-authors = [{ name = "Your Name", email = "you@example.com" }]
-keywords = ["hexagonal", "ddd", "fastapi", "template"]
+authors = [{ name = "Sergio Julian Zona Moreno", email = "sj.zonam@gmail.com" }]
+keywords = ["hexagonal", "ddd", "fastapi", "template","rag"]
 
 dependencies = [
     "fastapi>=0.115.0",
@@ -21,7 +21,6 @@ dependencies = [
     "fastembed>=0.2.0",
     "python-multipart>=0.0.9",
     "pymupdf>=1.23.0",
-    "pytesseract>=0.3.10",
     "pillow>=10.2.0",
     "langchain-text-splitters>=0.0.1",
     "langchain>=1.3.1",
@@ -29,7 +28,9 @@ dependencies = [
     "langchain-openai>=1.2.1",
     "langchain-google-genai>=4.2.2",
     "langgraph>=1.2.0",
-    "langfuse>=2.50.0",
+    "langfuse>=2.50.0,<3.0.0",
+    "streamlit>=1.57.0",
+    "requests>=2.34.2",
 ]
 
 [dependency-groups]
@@ -44,8 +45,6 @@ dev = [
     "bandit[toml]>=1.8.0",
     "pip-audit>=2.7.0",
     "pre-commit>=4.0.0",
-    "streamlit>=1.57.0",
-    "requests>=2.34.2",
 ]
 
 [build-system]

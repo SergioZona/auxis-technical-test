@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from app.application.ports.outbound.langchain_rag_port import LangChainRagPort
 from app.application.ports.outbound.vector_port import VectorPort
-from app.infrastructure.config.clients import engine
+from app.infrastructure.config.clients import engine, get_langfuse_handler
 from app.infrastructure.config.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -126,21 +126,10 @@ class LangChainRagAdapter(LangChainRagPort):
             )
 
     def _get_callbacks(self) -> list[Any]:
-        import os
-
         callbacks = []
-        if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
-            try:
-                from langfuse.callback import CallbackHandler
-
-                langfuse_handler = CallbackHandler(
-                    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
-                    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
-                    host=os.getenv("LANGFUSE_HOST", "http://localhost:3000"),
-                )
-                callbacks.append(langfuse_handler)
-            except ImportError:
-                pass
+        langfuse_handler = get_langfuse_handler()
+        if langfuse_handler:
+            callbacks.append(langfuse_handler)
         return callbacks
 
     def _extract_sources(self, intermediate_steps: list[Any]) -> list[dict[str, Any]]:
@@ -177,12 +166,22 @@ class LangChainRagAdapter(LangChainRagPort):
         tools = [search_documents_tool, query_database_tool]
 
         system_prompt = (
-            "You are a helpful tax and document intelligence assistant.\n"
+            "You are a helpful tax and document intelligence assistant.\n\n"
+            "## Step 1 — Understand the question\n"
+            "Read the user's question carefully. Determine:\n"
+            "- Does it require semantic search over document text (names, descriptions, content details)?\n"
+            "- Does it require structured data queries (counts, sums, averages, filtering by year/employer)?\n"
+            "- Does it require BOTH to give a complete answer?\n\n"
+            "## Step 2 — Select and use the right tool(s)\n"
             "You have access to two tools:\n"
-            "1. search_documents_tool: For semantic text search over document contents (Qdrant).\n"
-            "2. query_database_tool: For structured aggregations, filtering, statistics, and exact matches over the PostgreSQL metadata table.\n"
-            "IMPORTANT: If a question requires both semantic understanding (e.g. details about contents, categories, or raw descriptions) AND structured metrics (e.g. counts, sums, or SQL queries), you MUST use BOTH tools in tandem. Do not rely on just one if both can enrich the answer.\n"
-            "Synthesize the retrieved information clearly. Always return your final answer as clean, direct, human-readable markdown text. Avoid returning list structures, JSON wrappers, or raw dictionaries in your final output."
+            "1. search_documents_tool: For semantic text search over document contents stored in Qdrant vector DB.\n"
+            "2. query_database_tool: For structured SQL aggregations, filtering, statistics, and exact matches over the PostgreSQL metadata table.\n"
+            "IMPORTANT: If a question requires both semantic understanding AND structured metrics, you MUST use BOTH tools. Do not rely on just one if both can enrich the answer.\n\n"
+            "## Step 3 — Synthesize and respond\n"
+            "Combine all retrieved information into a clear, direct answer.\n"
+            "- Use clean, human-readable markdown text.\n"
+            "- Avoid returning list structures, JSON wrappers, or raw dictionaries.\n"
+            "- If data is missing or not found, say so explicitly rather than guessing."
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -202,6 +201,16 @@ class LangChainRagAdapter(LangChainRagPort):
         response = await agent_executor.ainvoke(
             {"input": question}, config={"callbacks": callbacks}
         )
+
+        # Flush Langfuse traces synchronously
+        for cb in callbacks:
+            try:
+                if hasattr(cb, "flush"):
+                    cb.flush()
+                elif hasattr(cb, "langfuse") and hasattr(cb.langfuse, "flush"):
+                    cb.langfuse.flush()
+            except Exception:
+                pass
 
         sources = self._extract_sources(response.get("intermediate_steps", []))
         ans = self._clean_output(response.get("output", ""))

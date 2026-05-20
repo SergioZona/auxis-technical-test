@@ -7,7 +7,23 @@ Streamlit frontend for uploading, inspecting, and querying invoices/certificates
 import requests
 import streamlit as st
 
-API_BASE = "http://localhost:8000/api/v1"
+import os
+
+import base64
+
+API_BASE = os.getenv("API_URL", "http://localhost:8000/api/v1")
+API_USERNAME = os.getenv("API_USERNAME", "auxis")
+API_PASSWORD = os.getenv("API_PASSWORD", "") or os.getenv("UI_PASSWORD", "")
+UI_PASSWORD = API_PASSWORD
+
+def _headers() -> dict[str, str]:
+    if API_PASSWORD:
+        username = API_USERNAME or "auxis"
+        usr_pwd = f"{username}:{API_PASSWORD}".encode("utf-8")
+        b64_creds = base64.b64encode(usr_pwd).decode("utf-8")
+        return {"Authorization": f"Basic {b64_creds}"}
+    return {}
+
 
 st.set_page_config(
     page_title="Invoice RAG — Document Intelligence",
@@ -15,6 +31,29 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ── Password Gate ─────────────────────────────────────────────────────────────
+if UI_PASSWORD and not st.session_state.get("authenticated"):
+    st.markdown(
+        """
+        <div style="display:flex;align-items:center;justify-content:center;min-height:60vh">
+            <div style="text-align:center;max-width:400px">
+                <h1>🔒</h1>
+                <h3>Invoice RAG — Protected Access</h3>
+                <p style="color:#888">Enter the password to continue</p>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    pwd = st.text_input("Password", type="password", key="login_pwd")
+    if st.button("🔓 Enter", type="primary"):
+        if pwd == UI_PASSWORD:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("❌ Incorrect password")
+    st.stop()
 
 # ── Sidebar nav ───────────────────────────────────────────────────────────────
 st.sidebar.title("🧾 Invoice RAG")
@@ -84,7 +123,7 @@ if page == "Upload & Extract":
         with st.spinner("Running LangGraph extraction pipeline…"):
             files = [("files", (f.name, f.read(), "application/pdf")) for f in uploaded]
             try:
-                resp = requests.post(f"{API_BASE}/documents/upload", files=files, timeout=120)
+                resp = requests.post(f"{API_BASE}/documents/upload", files=files, headers=_headers(), timeout=120)
                 resp.raise_for_status()
                 docs = resp.json()["data"]
             except Exception as e:
@@ -139,7 +178,7 @@ elif page == "Browse Documents":
 
     with st.spinner("Loading stored documents…"):
         try:
-            resp = requests.get(f"{API_BASE}/documents", params={"limit": 100, "offset": 0}, timeout=15)
+            resp = requests.get(f"{API_BASE}/documents", params={"limit": 100, "offset": 0}, headers=_headers(), timeout=15)
             resp.raise_for_status()
             docs = resp.json()["data"]
         except Exception as e:
@@ -214,6 +253,7 @@ elif page == "Browse Documents":
                         patch_resp = requests.patch(
                             f"{API_BASE}/documents/{selected_doc.get('id')}",
                             json=updates,
+                            headers=_headers(),
                             timeout=15
                         )
                         patch_resp.raise_for_status()
@@ -226,9 +266,17 @@ elif page == "Browse Documents":
             st.subheader("📄 Original Document PDF")
             pdf_url = f"{API_BASE}/documents/{selected_doc.get('id')}/pdf"
 
-            # Embed PDF using HTML iframe
-            pdf_iframe = f'<iframe src="{pdf_url}" width="100%" height="700px" style="border: none;"></iframe>'
-            st.markdown(pdf_iframe, unsafe_allow_html=True)
+            try:
+                import base64
+                pdf_resp = requests.get(pdf_url, headers=_headers())
+                if pdf_resp.status_code == 200:
+                    base64_pdf = base64.b64encode(pdf_resp.content).decode("utf-8")
+                    pdf_iframe = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="700px" style="border: none;"></iframe>'
+                    st.markdown(pdf_iframe, unsafe_allow_html=True)
+                else:
+                    st.warning("⚠️ Could not load PDF file from API")
+            except Exception as e:
+                st.error(f"Error loading PDF: {e}")
 
 # ── Page: Chat (Unified) ─────────────────────────────────────────────────────────
 elif page == "Chat":
@@ -256,6 +304,7 @@ elif page == "Chat":
                     resp = requests.post(
                         f"{API_BASE}/documents/chat",
                         json={"question": question},
+                        headers=_headers(),
                         timeout=60,
                     )
                     resp.raise_for_status()

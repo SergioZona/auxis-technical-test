@@ -9,13 +9,18 @@ Orchestrated via LangGraph:
   5. assemble: Canonical Document entity generation.
 """
 
+import asyncio
+import contextvars
 import io
 import logging
 import re
 from typing import Any, TypedDict
 
+_current_file_content_var = contextvars.ContextVar(
+    "_current_file_content_var", default=b""
+)
+
 import fitz  # PyMuPDF
-import pytesseract
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.graph import END, StateGraph
 from PIL import Image
@@ -24,6 +29,7 @@ from app.application.ports.outbound.ai_extractor_port import AiExtractorPort
 from app.application.ports.outbound.document_parser_port import DocumentParserPort
 from app.domain.exceptions.document_errors import ExtractionFailedError
 from app.domain.models.document import Document, DocumentChunk
+from app.infrastructure.config.clients import get_langfuse_handler
 
 logger = logging.getLogger(__name__)
 
@@ -80,18 +86,40 @@ class PyMuPDFDocumentParser(DocumentParserPort):
         self._graph = builder.compile()
 
     async def parse(self, file_content: bytes, filename: str) -> Document:
-        initial_state: ParserState = {
-            "file_content": file_content,
-            "filename": filename,
-            "pages": [],
-            "full_text": "",
-            "reconciled_metadata": {},
-            "reconciled_extras": {},
-            "chunks": [],
-            "document": None,
-        }
+        token = _current_file_content_var.set(file_content)
+        try:
+            initial_state: ParserState = {
+                "file_content": b"",  # Keep empty to avoid trace bloat and media upload errors
+                "filename": filename,
+                "pages": [],
+                "full_text": "",
+                "reconciled_metadata": {},
+                "reconciled_extras": {},
+                "chunks": [],
+                "document": None,
+            }
 
-        result = await self._graph.ainvoke(initial_state)
+            callbacks = []
+            langfuse_handler = get_langfuse_handler()
+            if langfuse_handler:
+                callbacks.append(langfuse_handler)
+
+            result = await self._graph.ainvoke(
+                initial_state, config={"callbacks": callbacks}
+            )
+
+            # Flush Langfuse traces synchronously
+            if langfuse_handler:
+                try:
+                    if hasattr(langfuse_handler, "flush"):
+                        langfuse_handler.flush()
+                    elif hasattr(langfuse_handler, "langfuse_client"):
+                        langfuse_handler.langfuse_client.flush()
+                except Exception:
+                    pass
+        finally:
+            _current_file_content_var.reset(token)
+
         if not result:
             raise ExtractionFailedError(f"LangGraph parsing failed for {filename}")
         doc = result.get("document")
@@ -102,7 +130,8 @@ class PyMuPDFDocumentParser(DocumentParserPort):
     # ── LangGraph Nodes ────────────────────────────────────────────────────
 
     def _classify_pages_node(self, state: ParserState) -> dict[str, Any]:
-        pdf = fitz.open(stream=state["file_content"], filetype="pdf")
+        file_content = _current_file_content_var.get()
+        pdf = fitz.open(stream=file_content, filetype="pdf")
         pages = []
         for n in range(len(pdf)):
             page_num = n + 1
@@ -146,48 +175,38 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             logger.warning(f"PyMuPDF find_tables failed on page {page_num}: {e}")
         return tables_text
 
-    def _ocr_page(self, png_bytes: bytes, page_num: int) -> str:
-        try:
-            img = Image.open(io.BytesIO(png_bytes))
-            return str(pytesseract.image_to_string(img, lang="spa+eng").strip())
-        except Exception as exc:
-            logger.warning(f"OCR failed on page {page_num}: {exc}")
-            return ""
-
     async def _process_scanned_page(
-        self, page_num: int, filename: str, ocr_text: str, png_bytes: bytes
+        self, page_num: int, filename: str, png_bytes: bytes
     ) -> tuple[dict[str, Any], str]:
-        logger.info(f"{filename}: Page {page_num} → scanned. Running OCR + AI.")
+        logger.info(
+            f"{filename}: Page {page_num} → scanned. Running AI Visual Analysis."
+        )
         ai_data = await self._ai_extractor.extract_metadata(
-            text=ocr_text or None,
+            text=None,
             image_bytes=png_bytes,
             filename=filename,
         )
         desc = ai_data.get("description", "")
-        extracted_text = ocr_text or ""
+        extracted_text = ""
         if desc:
-            extracted_text += f"\n\n[AI Visual Analysis]:\n{desc}"
+            extracted_text = f"[AI Visual Analysis]:\n{desc}"
         return ai_data, extracted_text
 
     async def _process_mixed_page(
         self,
         page_num: int,
         filename: str,
-        ocr_text: str,
         selectable_text: str,
         png_bytes: bytes,
     ) -> tuple[dict[str, Any], str]:
-        logger.info(f"{filename}: Page {page_num} → mixed. Running OCR + AI.")
-        combined_text = selectable_text
-        if ocr_text and ocr_text not in selectable_text:
-            combined_text = f"{selectable_text}\n\n[OCR Supplement]:\n{ocr_text}"
+        logger.info(f"{filename}: Page {page_num} → mixed. Running AI Visual Analysis.")
         ai_data = await self._ai_extractor.extract_metadata(
-            text=combined_text,
+            text=selectable_text,
             image_bytes=png_bytes,
             filename=filename,
         )
         desc = ai_data.get("description", "")
-        extracted_text = combined_text
+        extracted_text = selectable_text
         if desc:
             extracted_text += f"\n\n[AI Visual Analysis]:\n{desc}"
         return ai_data, extracted_text
@@ -200,22 +219,21 @@ class PyMuPDFDocumentParser(DocumentParserPort):
         classification = p_info["classification"]
 
         tables_text = self._extract_tables_md(page, page_num)
-        ocr_text = ""
+        tables_text = self._extract_tables_md(page, page_num)
         ai_data: dict[str, Any] = {}
         extracted_text = ""
 
         if classification in ("scanned", "mixed"):
             pix = page.get_pixmap(dpi=200)
             png_bytes = pix.tobytes("png")
-            ocr_text = self._ocr_page(png_bytes, page_num)
 
             if classification == "scanned":
                 ai_data, extracted_text = await self._process_scanned_page(
-                    page_num, filename, ocr_text, png_bytes
+                    page_num, filename, png_bytes
                 )
             else:
                 ai_data, extracted_text = await self._process_mixed_page(
-                    page_num, filename, ocr_text, selectable_text, png_bytes
+                    page_num, filename, selectable_text, png_bytes
                 )
         else:
             extracted_text = selectable_text
@@ -223,16 +241,17 @@ class PyMuPDFDocumentParser(DocumentParserPort):
         if tables_text:
             extracted_text += f"\n\n[Extracted Tables]:\n{tables_text}"
 
-        return extracted_text, tables_text, ai_data, ocr_text
+        return extracted_text, tables_text, ai_data
 
     async def _extract_page_content_node(self, state: ParserState) -> dict[str, Any]:
-        pdf = fitz.open(stream=state["file_content"], filetype="pdf")
+        file_content = _current_file_content_var.get()
+        pdf = fitz.open(stream=file_content, filetype="pdf")
         pages = list(state["pages"])
         full_text = ""
 
         for idx, p_info in enumerate(pages):
             page = pdf.load_page(p_info["page_number"] - 1)
-            extracted_text, tables_text, ai_data, ocr_text = await self._process_page(
+            extracted_text, tables_text, ai_data = await self._process_page(
                 page, p_info, state["filename"]
             )
             pages[idx] = {
@@ -240,7 +259,7 @@ class PyMuPDFDocumentParser(DocumentParserPort):
                 "extracted_text": extracted_text,
                 "tables_text": tables_text,
                 "ai_data": ai_data,
-                "ocr_text": ocr_text,
+                "ocr_text": "",
             }
             full_text += extracted_text + "\n"
 

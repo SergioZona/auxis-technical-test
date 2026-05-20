@@ -16,9 +16,10 @@ from app.infrastructure.adapters.outbound.persistence.database import get_db_ses
 from app.infrastructure.adapters.outbound.persistence.document_repository import (
     PostgresDocumentRepository,
 )
+from app.infrastructure.adapters.inbound.http.auth import require_api_token
 from app.infrastructure.config.container import Container
 
-router = APIRouter(tags=["documents"])
+router = APIRouter(tags=["documents"], dependencies=[Depends(require_api_token)])
 
 
 class ChatRequest(BaseModel):

@@ -29,3 +29,38 @@ def test_get_embedding_model():
             ):
                 model2 = get_embedding_model()
                 assert model2 is mock_model
+
+
+def test_get_langfuse_handler_none_if_keys_missing():
+    from app.infrastructure.config.clients import get_langfuse_handler
+
+    with patch("app.infrastructure.config.clients.settings") as mock_settings:
+        mock_settings.langfuse_public_key = ""
+        mock_settings.langfuse_secret_key = ""
+
+        with patch("app.infrastructure.config.clients._langfuse_handler", None):
+            handler = get_langfuse_handler()
+            assert handler is None
+
+
+def test_get_langfuse_handler_created_if_keys_present():
+    from app.infrastructure.config.clients import get_langfuse_handler
+
+    with patch("app.infrastructure.config.clients.settings") as mock_settings:
+        mock_settings.langfuse_public_key = "pub-key"
+        mock_settings.langfuse_secret_key = "sec-key"
+        mock_settings.langfuse_host = "http://localhost:3000"
+
+        with patch("app.infrastructure.config.clients._langfuse_handler", None):
+            with patch("langfuse.callback.CallbackHandler") as MockCallbackHandler:
+                mock_handler = MagicMock()
+                MockCallbackHandler.return_value = mock_handler
+
+                handler = get_langfuse_handler()
+
+                assert handler is mock_handler
+                MockCallbackHandler.assert_called_once_with(
+                    public_key="pub-key",
+                    secret_key="sec-key",
+                    host="http://localhost:3000",
+                )

@@ -41,6 +41,18 @@ class Settings(BaseSettings):
     secret_key: str = Field(default="", min_length=1)
     openai_api_key: str = Field(default="")
     gemini_api_key: str = Field(default="")
+    langfuse_public_key: str = Field(default="")
+    langfuse_secret_key: str = Field(default="")
+    langfuse_host: str = Field(default="http://localhost:3000")
+    api_username: str = Field(default="auxis")
+    api_password: str = Field(default="")
+
+    @field_validator("api_password", mode="before")
+    @classmethod
+    def fallback_ui_pwd(cls, v: Any) -> Any:
+        if not v:
+            return os.getenv("UI_PASSWORD") or ""
+        return v
 
     # ── Computed ─────────────────────────────────────────────────────────────
     @property

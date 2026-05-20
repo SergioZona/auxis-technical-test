@@ -7,13 +7,22 @@ WORKDIR /app
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Copy dependency files first (layer cache)
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md ./
+
+# Install build tools (needed to compile Rust/C dependencies on Python 3.14)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    cargo \
+    rustc \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install only runtime dependencies (no dev group)
 RUN uv sync --frozen --no-group dev --no-editable
 
 # Copy source code
 COPY src/ ./src/
+COPY ui/ ./ui/
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM python:3.14-slim AS runtime
@@ -24,8 +33,12 @@ WORKDIR /app
 RUN useradd --create-home --shell /bin/bash appuser
 
 # Copy installed packages and app from builder
-COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /app/src /app/src
+COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
+COPY --from=builder --chown=appuser:appuser /app/src /app/src
+COPY --from=builder --chown=appuser:appuser /app/ui /app/ui
+
+# Create data directory and ensure ownership
+RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
 
 # Activate venv
 ENV PATH="/app/.venv/bin:$PATH"
@@ -34,6 +47,10 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 USER appuser
+
+# Pre-download the FastEmbed model to bake it into the Docker image
+# This avoids unauthenticated HF Hub warnings and slow startup times at runtime.
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5')"
 
 EXPOSE 8000
 
