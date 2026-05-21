@@ -74,6 +74,12 @@ services:
       - API_URL=http://api:8000/api/v1
       - API_USERNAME=${API_USERNAME}
       - API_PASSWORD=${API_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8501/_stcore/health || exit 1"]
+      interval: 30s
+      timeout: 15s
+      start_period: 60s
+      retries: 5
     depends_on:
       - api
 
