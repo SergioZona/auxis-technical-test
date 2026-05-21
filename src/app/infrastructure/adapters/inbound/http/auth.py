@@ -13,7 +13,7 @@ from app.infrastructure.config.settings import get_settings
 _basic_scheme = HTTPBasic(auto_error=False)
 
 
-async def require_api_token(
+def require_api_token(
     credentials: HTTPBasicCredentials | None = Depends(_basic_scheme),
 ) -> str:
     """Enforces HTTP Basic authentication using api_username and api_password."""
