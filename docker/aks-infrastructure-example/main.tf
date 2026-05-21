@@ -53,11 +53,16 @@ resource "azurerm_subnet" "db_subnet" {
 
 # 3. Azure Container Registry (ACR) for Docker Image Hosting
 resource "azurerm_container_registry" "acr" {
-  name                = var.acr_name
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_resource_group.rg.location
-  sku                 = "Standard"
-  admin_enabled       = false
+  name                          = var.acr_name
+  resource_group_name           = azurerm_resource_group.rg.name
+  location                      = azurerm_resource_group.rg.location
+  sku                           = "Standard"
+  admin_enabled                 = false
+  public_network_access_enabled = false # S6329: restrict public internet access
+
+  identity {
+    type = "SystemAssigned" # S6378: enable Managed Identity for secure Azure service auth
+  }
 }
 
 # 4. Azure Kubernetes Service (AKS) Cluster
