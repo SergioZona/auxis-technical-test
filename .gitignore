@@ -57,3 +57,7 @@ Thumbs.db
 *.sqlite3
 # Added by code-review-graph
 .code-review-graph/
+
+# Local data and test files
+data/
+tests/files/

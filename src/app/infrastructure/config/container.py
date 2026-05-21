@@ -6,9 +6,16 @@ Nothing outside this file should instantiate adapters or use cases directly.
 
 from dependency_injector import containers, providers
 
-from app.application.use_cases.item_use_case import ItemUseCase
-from app.infrastructure.adapters.outbound.persistence.item_repository import (
-    SQLAlchemyItemRepository,
+from app.application.use_cases.chat_rag_use_case import ChatRagUseCase
+from app.application.use_cases.process_documents_use_case import ProcessDocumentsUseCase
+from app.application.use_cases.query_database_use_case import QueryDatabaseUseCase
+from app.infrastructure.adapters.outbound.ai_extractor import LlmAiExtractor
+from app.infrastructure.adapters.outbound.document_parser import PyMuPDFDocumentParser
+from app.infrastructure.adapters.outbound.langchain_rag_adapter import (
+    LangChainRagAdapter,
+)
+from app.infrastructure.adapters.outbound.persistence.vector_repository import (
+    QdrantVectorRepository,
 )
 from app.infrastructure.config.settings import Settings, get_settings
 
@@ -27,15 +34,53 @@ class Container(containers.DeclarativeContainer):
     settings: providers.Singleton[Settings] = providers.Singleton(get_settings)
 
     # ── Outbound adapters (driven) ─────────────────────────────────────────────
-    # Replace SQLAlchemyItemRepository with your real implementation.
-    # For testing, override with a mock/in-memory repo:
-    #   container.item_repository.override(InMemoryItemRepository())
-    item_repository: providers.Factory[SQLAlchemyItemRepository] = providers.Factory(
-        SQLAlchemyItemRepository,
+
+    ai_extractor: providers.Singleton[LlmAiExtractor] = providers.Singleton(
+        LlmAiExtractor,
+        settings=settings,
     )
 
+    document_parser: providers.Singleton[PyMuPDFDocumentParser] = providers.Singleton(
+        PyMuPDFDocumentParser,
+        ai_extractor=ai_extractor,
+    )
+
+    vector_repository: providers.Singleton[QdrantVectorRepository] = (
+        providers.Singleton(
+            QdrantVectorRepository,
+        )
+    )
+
+    langchain_rag_adapter: providers.Singleton[LangChainRagAdapter] = (
+        providers.Singleton(
+            LangChainRagAdapter,
+            settings=settings,
+            vector_port=vector_repository,
+        )
+    )
+
+    # document_repository is session-scoped so it's a Factory injected per request
+    # We expose it as a provider but wiring happens at the router level via FastAPI dep
+
     # ── Use cases (application) ───────────────────────────────────────────────
-    item_use_case: providers.Factory[ItemUseCase] = providers.Factory(
-        ItemUseCase,
-        repository=item_repository,
+
+    process_documents_use_case: providers.Factory[ProcessDocumentsUseCase] = (
+        providers.Factory(
+            ProcessDocumentsUseCase,
+            parser=document_parser,
+            vector_db=vector_repository,
+            max_upload_size_mb=settings.provided.max_upload_size_mb,
+        )
+    )
+
+    chat_rag_use_case: providers.Factory[ChatRagUseCase] = providers.Factory(
+        ChatRagUseCase,
+        langchain_rag=langchain_rag_adapter,
+    )
+
+    query_database_use_case: providers.Factory[QueryDatabaseUseCase] = (
+        providers.Factory(
+            QueryDatabaseUseCase,
+            langchain_rag=langchain_rag_adapter,
+        )
     )

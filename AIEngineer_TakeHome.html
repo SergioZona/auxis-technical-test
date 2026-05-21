@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Engineer — Take Home Exercise</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+  :root{
+    --bg:#f4f5f2; --card:#fff; --ink:#1a1a14; --muted:#5c5c54; --accent:#c9a227; --border:#e2e4dc;
+  }
+  *{box-sizing:border-box}
+  body{font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.55;margin:0;padding:0}
+  .wrap{max-width:960px;margin:0 auto;padding:32px 24px 80px}
+  header{background:linear-gradient(135deg,#222 0%,#2a2838 100%);color:#fff;padding:36px;border-radius:12px;border-left:6px solid var(--accent);}
+  header h1{font-family:'Space Grotesk',sans-serif;margin:0 0 6px;font-size:1.5rem}
+  header .subtitle{opacity:.9}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;margin-top:18px}
+  h2{font-family:'Space Grotesk',sans-serif;margin:0 0 8px}
+  .pill{display:inline-block;padding:6px 12px;border-radius:999px;background:#eef2ff;color:#1e40af;font-weight:700;margin-bottom:10px}
+  .q{font-weight:700;margin:8px 0}
+  .note{color:var(--muted);margin-top:6px}
+  ul{margin:8px 0 0 20px}
+  pre{background:#0b1220;color:#e6eef8;padding:12px;border-radius:8px;overflow:auto}
+  @media (max-width:600px){.wrap{padding:20px}.card{padding:14px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>AI Engineer — Take Home Exercise</h1>
+    <div class="subtitle">Short, focused engineering exercise</div>
+  </header>
+
+  <section class="card">
+    <span class="pill">Context</span>
+    <p class="q">Five PDF documents containing tax tables are uploaded. The data should be stored in a database and a GET endpoint should return the stored records.</p>
+    <p class="note">Deliverables: service URL, README, and a C4 Components diagram (Mermaid).</p>
+  </section>
+
+  <section class="card">
+    <h2>Objectives</h2>
+    <ul>
+      <li>Evaluate backend design for endpoints, persistence, and API behavior.</li>
+      <li>Understand the development cycle and tools used.</li>
+      <li>Demonstrate a practical AI approach for extracting structured data from PDFs.</li>
+    </ul>
+  </section>
+
+
+  <section class="card">
+    <h2>Deliverables</h2>
+    <ul>
+      <li>Service URL to consume the service (can use a free endpoint like Vercel or Ngrok).</li>
+      <li>README with setup, run instructions, and architecture notes.</li>
+      <li>C4 Components diagram in Mermaid format.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>Evaluation criteria</h2>
+    <ul>
+      <li>Clear backend and API design.</li>
+      <li>Practical approach to PDF data extraction and normalization.</li>
+      <li>Reasoning about parallel processing and bottleneck mitigation.</li>
+      <li>Documentation of development steps and tool choices.</li>
+    </ul>
+  </section>
+</div>
+</body>
+</html>
