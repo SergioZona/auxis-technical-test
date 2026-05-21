@@ -38,7 +38,6 @@ class Settings(BaseSettings):
 
     # ── Secrets (injected at runtime — NEVER commit these) ──────────────────
     database_password: str = Field(default="", min_length=1)
-    secret_key: str = Field(default="", min_length=1)
     openai_api_key: str = Field(default="")
     gemini_api_key: str = Field(default="")
 

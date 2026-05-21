@@ -5,7 +5,6 @@ import os
 # Set dummy environment variables for tests before importing the application
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("DATABASE_PASSWORD", "test_db_pass")
-os.environ.setdefault("SECRET_KEY", "test_secret_key")
 os.environ.setdefault("OPENAI_API_KEY", "test_openai_key")
 os.environ.setdefault("GEMINI_API_KEY", "test_gemini_key")
 
