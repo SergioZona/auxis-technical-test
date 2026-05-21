@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.0.0](https://github.com/SergioZona/auxis-technical-test/compare/v1.0.0...v1.0.0) (2026-05-21)
+
+
+### Features
+
+* implement LangChain RAG adapter with vector search and SQL query tools for document intelligence ([21d2f73](https://github.com/SergioZona/auxis-technical-test/commit/21d2f7321a825031d9f0aa381e69f4863641f05f))
+* implement RAG chat, document metadata curation, and Langfuse tr… ([9a37453](https://github.com/SergioZona/auxis-technical-test/commit/9a374539183c91714c14906b252e15e4ac51ef0a))
+* implement RAG chat, document metadata curation, and Langfuse tracing ([a9901a5](https://github.com/SergioZona/auxis-technical-test/commit/a9901a5b0ed872d2458ae0b9c09ff5ffeefb364c))
+* **rag:** overhaul architecture diagrams, integrate SonarQube docker scan, purge obsolete env variables ([b994bd7](https://github.com/SergioZona/auxis-technical-test/commit/b994bd7c15c5c358e8337d00c57debbe110fdd35))
+* **tracing:** add LangSmith tracing and fix CI Add [@traceable](https://github.com/traceable) to router endpoints, document parser, and RAG adapter. Fix Ruff lints, import ordering, type signatures, and test config ([3e9895a](https://github.com/SergioZona/auxis-technical-test/commit/3e9895a33be34eddcab653c0916bc15174425a67))
+
+
+### Bug Fixes
+
+* **ci:** resolve sonar async warning and coverage gaps ([9227188](https://github.com/SergioZona/auxis-technical-test/commit/9227188083de3f208998c496af7bffb78b2f57a2))
+* **docker:** attach api and ui to dokploy-network for SSL cert issuance ([97fd6cb](https://github.com/SergioZona/auxis-technical-test/commit/97fd6cb8de206e203e1618ead1e06cd28172ccdf))
+* **docker:** change ui healthcheck from wget to python urllib ([d04e97a](https://github.com/SergioZona/auxis-technical-test/commit/d04e97ac7987f00d85b50b7fcd734a1595f68651))
+* **docker:** update ui healthcheck to use wget and increase timeout ([29e3dda](https://github.com/SergioZona/auxis-technical-test/commit/29e3dda859bf81c37ea82a531f8899409fb1e341))
+* **infra:** resolve SonarQube ACR security hotspots S6329 and S6378 ([3bbc2ca](https://github.com/SergioZona/auxis-technical-test/commit/3bbc2ca8da3bbae3a4759787600034241fcde47d))
+* **persistence:** strip timezone from upload_date ([42a8bf5](https://github.com/SergioZona/auxis-technical-test/commit/42a8bf50e62eedc4ddf865b6868b42bc200e20cf))
+* ruff format ([634591a](https://github.com/SergioZona/auxis-technical-test/commit/634591a092b42b8c7bb9ca94a3996e88c04102f7))
+
 ## 1.0.0 (2026-05-19)
 
 
