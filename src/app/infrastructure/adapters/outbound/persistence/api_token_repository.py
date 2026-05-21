@@ -49,7 +49,7 @@ async def verify_db_token(session: AsyncSession, token: str) -> bool:
 
     query = select(ApiTokenModel).where(
         ApiTokenModel.token_hash == hashed,
-        ApiTokenModel.is_active == True,
+        ApiTokenModel.is_active,
     )
     result = await session.execute(query)
     model = result.scalar_one_or_none()
@@ -57,7 +57,4 @@ async def verify_db_token(session: AsyncSession, token: str) -> bool:
     if not model:
         return False
 
-    if model.expires_at and model.expires_at < now:
-        return False
-
-    return True
+    return not (model.expires_at and model.expires_at < now)

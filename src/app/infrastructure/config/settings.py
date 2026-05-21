@@ -22,8 +22,8 @@ _env_file = f"src/env/{_app_env.upper()}.env" if _app_env else "src/env/.env"
 class Settings(BaseSettings):
     # ── Config (from .env file — safe to version control) ──────────────────
     app_env: str = "dev"
-    app_name: str = "hexagonal-backend-template"
-    app_version: str = "0.0.0"  # bumped by Release Please on every release
+    app_name: str = "auxis-technical-test"
+    app_version: str = "1.0.0"
     api_version: str = "v1"
     debug: bool = False
     log_level: str = "INFO"
@@ -41,9 +41,7 @@ class Settings(BaseSettings):
     secret_key: str = Field(default="", min_length=1)
     openai_api_key: str = Field(default="")
     gemini_api_key: str = Field(default="")
-    langfuse_public_key: str = Field(default="")
-    langfuse_secret_key: str = Field(default="")
-    langfuse_host: str = Field(default="http://localhost:3000")
+
     api_username: str = Field(default="auxis")
     api_password: str = Field(default="")
 

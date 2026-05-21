@@ -9,27 +9,24 @@ Orchestrated via LangGraph:
   5. assemble: Canonical Document entity generation.
 """
 
-import asyncio
 import contextvars
-import io
 import logging
 import re
 from typing import Any, TypedDict
 
-_current_file_content_var = contextvars.ContextVar(
-    "_current_file_content_var", default=b""
-)
-
 import fitz  # PyMuPDF
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.graph import END, StateGraph
-from PIL import Image
+from langsmith import traceable
 
 from app.application.ports.outbound.ai_extractor_port import AiExtractorPort
 from app.application.ports.outbound.document_parser_port import DocumentParserPort
 from app.domain.exceptions.document_errors import ExtractionFailedError
 from app.domain.models.document import Document, DocumentChunk
-from app.infrastructure.config.clients import get_langfuse_handler
+
+_current_file_content_var = contextvars.ContextVar(
+    "_current_file_content_var", default=b""
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +82,7 @@ class PyMuPDFDocumentParser(DocumentParserPort):
 
         self._graph = builder.compile()
 
+    @traceable(name="parse_document")
     async def parse(self, file_content: bytes, filename: str) -> Document:
         token = _current_file_content_var.set(file_content)
         try:
@@ -99,24 +97,7 @@ class PyMuPDFDocumentParser(DocumentParserPort):
                 "document": None,
             }
 
-            callbacks = []
-            langfuse_handler = get_langfuse_handler()
-            if langfuse_handler:
-                callbacks.append(langfuse_handler)
-
-            result = await self._graph.ainvoke(
-                initial_state, config={"callbacks": callbacks}
-            )
-
-            # Flush Langfuse traces synchronously
-            if langfuse_handler:
-                try:
-                    if hasattr(langfuse_handler, "flush"):
-                        langfuse_handler.flush()
-                    elif hasattr(langfuse_handler, "langfuse_client"):
-                        langfuse_handler.langfuse_client.flush()
-                except Exception:
-                    pass
+            result = await self._graph.ainvoke(initial_state)
         finally:
             _current_file_content_var.reset(token)
 
@@ -213,12 +194,11 @@ class PyMuPDFDocumentParser(DocumentParserPort):
 
     async def _process_page(
         self, page: fitz.Page, p_info: dict[str, Any], filename: str
-    ) -> tuple[str, str, dict[str, Any], str]:
+    ) -> tuple[str, str, dict[str, Any]]:
         page_num = p_info["page_number"]
         selectable_text = p_info["selectable_text"]
         classification = p_info["classification"]
 
-        tables_text = self._extract_tables_md(page, page_num)
         tables_text = self._extract_tables_md(page, page_num)
         ai_data: dict[str, Any] = {}
         extracted_text = ""

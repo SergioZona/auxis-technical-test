@@ -6,11 +6,12 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
+from langsmith import traceable
 from sqlalchemy import text
 
 from app.application.ports.outbound.langchain_rag_port import LangChainRagPort
 from app.application.ports.outbound.vector_port import VectorPort
-from app.infrastructure.config.clients import engine, get_langfuse_handler
+from app.infrastructure.config.clients import engine
 from app.infrastructure.config.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -126,11 +127,7 @@ class LangChainRagAdapter(LangChainRagPort):
             )
 
     def _get_callbacks(self) -> list[Any]:
-        callbacks = []
-        langfuse_handler = get_langfuse_handler()
-        if langfuse_handler:
-            callbacks.append(langfuse_handler)
-        return callbacks
+        return []
 
     def _extract_sources(self, intermediate_steps: list[Any]) -> list[dict[str, Any]]:
         sources = []
@@ -161,6 +158,7 @@ class LangChainRagAdapter(LangChainRagPort):
             return str(ans["text"])
         return str(ans)
 
+    @traceable(name="ask_rag_question")
     async def ask_rag_question(self, question: str) -> dict[str, Any]:
         llm = self._get_llm()
         tools = [search_documents_tool, query_database_tool]
@@ -202,15 +200,7 @@ class LangChainRagAdapter(LangChainRagPort):
             {"input": question}, config={"callbacks": callbacks}
         )
 
-        # Flush Langfuse traces synchronously
-        for cb in callbacks:
-            try:
-                if hasattr(cb, "flush"):
-                    cb.flush()
-                elif hasattr(cb, "langfuse") and hasattr(cb.langfuse, "flush"):
-                    cb.langfuse.flush()
-            except Exception:
-                pass
+
 
         sources = self._extract_sources(response.get("intermediate_steps", []))
         ans = self._clean_output(response.get("output", ""))

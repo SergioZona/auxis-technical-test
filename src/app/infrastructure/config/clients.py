@@ -37,43 +37,9 @@ def get_embedding_model() -> TextEmbedding:
     return _embedding_model
 
 
-# ── Langfuse Tracing Client ───────────────────────────────────────────────────
-_langfuse_handler = None
-
-def get_langfuse_handler():
-    global _langfuse_handler
-    if not settings.langfuse_public_key or not settings.langfuse_secret_key:
-        return None
-
-    if _langfuse_handler is not None:
-        return _langfuse_handler
-
-    try:
-        import os
-
-        os.environ.setdefault("LANGFUSE_PUBLIC_KEY", settings.langfuse_public_key)
-        os.environ.setdefault("LANGFUSE_SECRET_KEY", settings.langfuse_secret_key)
-        os.environ.setdefault("LANGFUSE_HOST", settings.langfuse_host)
-
-        from langfuse.callback import CallbackHandler
-
-        _langfuse_handler = CallbackHandler(
-            public_key=settings.langfuse_public_key,
-            secret_key=settings.langfuse_secret_key,
-            host=settings.langfuse_host,
-        )
-        return _langfuse_handler
-    except ImportError as e:
-        import logging
-
-        logging.getLogger(__name__).warning(
-            f"Langfuse tracing disabled — missing dependency: {e}"
-        )
-        return None
-    except Exception as e:
-        import logging
-
-        logging.getLogger(__name__).error(
-            f"Error initializing Langfuse CallbackHandler: {e}"
-        )
-        return None
+# ── Tracing ───────────────────────────────────────────────────────────────────
+# LangSmith tracing is enabled automatically via env vars:
+#   LANGCHAIN_TRACING_V2=true
+#   LANGCHAIN_API_KEY=ls__...
+#   LANGCHAIN_PROJECT=auxis
+# No extra client needed — LangChain picks them up at import time.

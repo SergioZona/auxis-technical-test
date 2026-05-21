@@ -1,5 +1,5 @@
 """
-Invoice RAG — Document Intelligence UI
+Tax Invoice RAG — Document Intelligence UI
 Streamlit frontend for uploading, inspecting, and querying invoices/certificates.
 """
 
@@ -26,7 +26,7 @@ def _headers() -> dict[str, str]:
 
 
 st.set_page_config(
-    page_title="Invoice RAG — Document Intelligence",
+    page_title="Tax Invoice RAG — Document Intelligence",
     page_icon="🧾",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -39,7 +39,7 @@ if UI_PASSWORD and not st.session_state.get("authenticated"):
         <div style="display:flex;align-items:center;justify-content:center;min-height:60vh">
             <div style="text-align:center;max-width:400px">
                 <h1>🔒</h1>
-                <h3>Invoice RAG — Protected Access</h3>
+                <h3>Tax Invoice RAG — Protected Access</h3>
                 <p style="color:#888">Enter the password to continue</p>
             </div>
         </div>
@@ -56,7 +56,7 @@ if UI_PASSWORD and not st.session_state.get("authenticated"):
     st.stop()
 
 # ── Sidebar nav ───────────────────────────────────────────────────────────────
-st.sidebar.title("🧾 Invoice RAG")
+st.sidebar.title("🧾 Tax Invoice RAG")
 page = st.sidebar.radio(
     "Navigate",
     ["Upload & Extract", "Browse Documents", "Chat"],

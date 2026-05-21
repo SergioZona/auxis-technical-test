@@ -4,6 +4,7 @@ from typing import Annotated, Any
 from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from langsmith import traceable
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,12 +12,12 @@ from app.application.use_cases.chat_rag_use_case import ChatRagUseCase
 from app.application.use_cases.process_documents_use_case import ProcessDocumentsUseCase
 from app.application.use_cases.query_database_use_case import QueryDatabaseUseCase
 from app.domain.exceptions.document_errors import FileSizeLimitExceededError
+from app.infrastructure.adapters.inbound.http.auth import require_api_token
 from app.infrastructure.adapters.inbound.http.jsend import success
 from app.infrastructure.adapters.outbound.persistence.database import get_db_session
 from app.infrastructure.adapters.outbound.persistence.document_repository import (
     PostgresDocumentRepository,
 )
-from app.infrastructure.adapters.inbound.http.auth import require_api_token
 from app.infrastructure.config.container import Container
 
 router = APIRouter(tags=["documents"], dependencies=[Depends(require_api_token)])
@@ -75,6 +76,7 @@ def _map_document_to_dict(doc: Any) -> dict[str, Any]:
     },
 )
 @inject
+@traceable(name="/documents/upload")
 async def upload_documents(
     files: Annotated[list[UploadFile], File()],
     process_use_case: Annotated[
@@ -151,6 +153,7 @@ async def list_documents(
     },
 )
 @inject
+@traceable(name="/documents/chat")
 async def chat_documents(
     request: ChatRequest,
     chat_use_case: Annotated[
