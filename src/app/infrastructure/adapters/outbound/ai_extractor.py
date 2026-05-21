@@ -12,72 +12,69 @@ from app.infrastructure.config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-# Chain-of-Thought extraction prompt — 10 canonical fields + extras
+# Chain-of-Thought extraction prompt — 7 canonical fields + tables + unconstrained extras
 PROMPT_TEMPLATE = """\
-You are an expert document analyst specializing in Colombian tax withholding certificates (DIAN).
+You are an expert document analyst specializing in invoices, receipts, and general business documents.
 
 ## Step 1 — Understand the document
 Read the content carefully. Identify:
-- Is this a Form 220 (Certificado de Ingresos y Retenciones)?
-- Who is the employer (pagador/empresa)?
-- Who is the employee (beneficiario)?
-- What tax year does it cover?
-- What is the certification period (start and end dates)?
-- What are the two most important financial figures: total gross income and income tax withheld?
+- What type of document is this? (e.g. "invoice", "receipt", "certificate", "other")
+- When was it issued? (doc_date)
+- What is the identifier? (doc_number/invoice number)
+- Who is issuing the document? (vendor_name)
+- Who is receiving the document? (client_name)
+- What are the financial sums? (total_amount and tax_amount)
 
-## Step 2 — Locate each field
+## Step 2 — Locate and parse each field
 For each required field below, think through where in the document it appears and what value it holds.
-- Monetary values in Colombian documents use period as thousands separator and comma as decimal (e.g. $72.221.000 = 72221000.0).
-- NIT numbers may appear as "NIT 901638314-5" or just "901638314 5".
-- Employee names in Form 220 appear as: Primer apellido | Segundo apellido | Primer nombre | Otros nombres.
-- Dates should be strictly parsed in YYYY-MM-DD format.
+- Monetary values and amounts should be carefully parsed as floats. Remove currency symbols, parentheses, spaces, and commas/periods as separators (e.g., "$ 20.27" or "($20.27)" -> 20.27).
+- Dates should be strictly parsed in YYYY-MM-DD format (convert formats like "8/8/2024" to "2024-08-08").
 
-## Step 3 — Output ONLY valid JSON
-Return exactly this JSON object and nothing else. No markdown, no explanation, no extra keys.
+## Step 3 — Extract Tables / Line Items
+If there is tabular data or line items (such as product descriptions, quantities, unit prices, and row totals), extract them as objects in the `tables` list.
+Each row should typically contain:
+- `description`: product/service description
+- `qty`: quantity ordered/shipped (number)
+- `unit_price`: price per unit (float)
+- `total`: total line amount (float)
 
-Required fields (10 canonical + extras):
+## Step 4 — Extract Extras (Unconstrained)
+Any other key-value pairs not covered by the 7 canonical fields should be extracted into the `extras` dictionary.
+Feel free to generate new custom keys dynamically based on the document's content (e.g. "subtotal", "discount", "shipping", "payment_terms", "payment_instructions", "venmo_account", "paypal_account", "remarks", etc.).
+Always include a concise visual/layout summary of the page under the "description" key inside `extras`.
+
+## Step 5 — Output ONLY valid JSON
+Return exactly this JSON object and nothing else. No markdown wrapping, no explanation, no extra keys outside this schema:
+
 {
-  "form_type": "<\"220\"|\"210\"|\"2516\"|\"110\"|\"invoice\"|null>",
-  "tax_year": <integer|null>,
-  "nit_employer": "<NIT with DV e.g. \"901638314-5\"|null>",
-  "employer_name": "<legal company name only — no description|null>",
-  "employee_document_id": "<CC/NIT number string|null>",
-  "employee_name": "<full name — no description|null>",
-  "period_start": "<YYYY-MM-DD|null>",
-  "period_end": "<YYYY-MM-DD|null>",
-  "total_gross_income": <float|null>,
-  "income_tax_withheld": <float|null>,
+  "document_type": "<\"invoice\"|\"receipt\"|\"certificate\"|\"other\">",
+  "doc_date": "<YYYY-MM-DD|null>",
+  "doc_number": "<string|null>",
+  "vendor_name": "<string|null>",
+  "client_name": "<string|null>",
+  "total_amount": <float|null>,
+  "tax_amount": <float|null>,
+  "tables": [
+    {
+      "description": "<string>",
+      "qty": <number|null>,
+      "unit_price": <float|null>,
+      "total": <float|null>
+    }
+  ],
   "extras": {
-    "form_number": "<string|null>",
-    "location": "<city string|null>",
-    "salary_payments": <float|null>,
-    "social_benefits": <float|null>,
-    "other_income_payments": <float|null>,
-    "health_contributions": <float|null>,
-    "pension_contributions": <float|null>,
-    "average_monthly_income": <float|null>,
-    "total_annual_withholding": <float|null>,
-    "description": "<concise visual/layout summary of the page>"
+    "description": "<concise visual/layout summary of the page>",
+    "custom_key_1": "value"
   }
 }
 """
-
-_FLOAT_EXTRAS = [
-    "salary_payments",
-    "social_benefits",
-    "other_income_payments",
-    "health_contributions",
-    "pension_contributions",
-    "average_monthly_income",
-    "total_annual_withholding",
-]
 
 
 class LlmAiExtractor(AiExtractorPort):
     """
     Adapter implementing AI extraction via Gemini or OpenAI APIs using LangChain.
-    Uses a Chain-of-Thought prompt for higher accuracy on the 10 canonical fields.
-    Secondary fields go into the nested `extras` dict.
+    Uses a Chain-of-Thought prompt for higher accuracy on the 7 canonical fields.
+    Secondary fields go into the nested `extras` dict, and tabular items go into `tables`.
     """
 
     def __init__(self, settings: Settings):
@@ -127,6 +124,12 @@ class LlmAiExtractor(AiExtractorPort):
         if val is None:
             return None
         try:
+            # Handle string formatting like ($2.00) or $ 20.27
+            if isinstance(val, str):
+                cleaned = val.replace("$", "").replace(" ", "").replace(",", "")
+                if cleaned.startswith("(") and cleaned.endswith(")"):
+                    cleaned = cleaned[1:-1]
+                return float(cleaned)
             return float(val)
         except ValueError, TypeError:
             return None
@@ -141,18 +144,25 @@ class LlmAiExtractor(AiExtractorPort):
 
     def _coerce_types(self, result: dict[str, Any]) -> dict[str, Any]:
         """Ensure numeric fields are correct Python types, not strings."""
-        for f in ["total_gross_income", "income_tax_withheld"]:
+        for f in ["total_amount", "tax_amount"]:
             if f in result:
                 result[f] = self._coerce_float(result[f])
 
-        if "tax_year" in result:
-            result["tax_year"] = self._coerce_int(result["tax_year"])
+        if "tables" in result and isinstance(result["tables"], list):
+            coerced_tables = []
+            for row in result["tables"]:
+                if isinstance(row, dict):
+                    coerced_row = {**row}
+                    for k in ["qty", "unit_price", "total"]:
+                        if k in coerced_row:
+                            coerced_row[k] = self._coerce_float(coerced_row[k])
+                    coerced_tables.append(coerced_row)
+            result["tables"] = coerced_tables
+        else:
+            result["tables"] = []
 
-        extras = result.get("extras") or {}
-        for f in _FLOAT_EXTRAS:
-            if f in extras:
-                extras[f] = self._coerce_float(extras[f])
-        result["extras"] = extras
+        if "extras" not in result or not isinstance(result["extras"], dict):
+            result["extras"] = {}
         return result
 
     async def extract_metadata(
@@ -193,9 +203,9 @@ class LlmAiExtractor(AiExtractorPort):
 
             logger.info(
                 f"AI extraction OK '{filename}': "
-                f"employee={result.get('employee_name')}, "
-                f"gross={result.get('total_gross_income')}, "
-                f"withheld={result.get('income_tax_withheld')}"
+                f"document_type={result.get('document_type')}, "
+                f"vendor={result.get('vendor_name')}, "
+                f"total={result.get('total_amount')}"
             )
             return result
 

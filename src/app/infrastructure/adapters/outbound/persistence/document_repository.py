@@ -18,7 +18,7 @@ from app.infrastructure.adapters.outbound.persistence.database import Base
 class DocumentModel(Base):
     """
     SQLAlchemy ORM for the `documents` table.
-    10 canonical queryable columns + processing metadata + JSONB extras.
+    7 canonical queryable columns + processing metadata + JSONB tables + JSONB extras.
     """
 
     __tablename__ = "documents"
@@ -30,17 +30,14 @@ class DocumentModel(Base):
         DateTime, nullable=False, server_default=func.now()
     )
 
-    # ── 10 canonical columns ──────────────────────────────────────────────────
-    form_type: Mapped[str | None] = mapped_column(String, nullable=True)
-    tax_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    nit_employer: Mapped[str | None] = mapped_column(String, nullable=True)
-    employer_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    employee_document_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    employee_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    period_start: Mapped[str | None] = mapped_column(String, nullable=True)
-    period_end: Mapped[str | None] = mapped_column(String, nullable=True)
-    total_gross_income: Mapped[float | None] = mapped_column(Float, nullable=True)
-    income_tax_withheld: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # ── 7 canonical columns ───────────────────────────────────────────────────
+    document_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    doc_date: Mapped[str | None] = mapped_column(String, nullable=True)
+    doc_number: Mapped[str | None] = mapped_column(String, nullable=True)
+    vendor_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    client_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    total_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tax_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # ── Processing metadata ───────────────────────────────────────────────────
     extraction_method: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -48,7 +45,10 @@ class DocumentModel(Base):
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     processing_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # ── JSONB overflow (secondary fields + description + anything else) ───────
+    # ── JSONB columns ─────────────────────────────────────────────────────────
+    tables: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
     extras: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
 
@@ -57,20 +57,18 @@ def _model_to_domain(m: DocumentModel) -> Document:
         id=m.id,
         filename=m.filename,
         upload_date=m.upload_date,
-        form_type=m.form_type,
-        tax_year=m.tax_year,
-        nit_employer=m.nit_employer,
-        employer_name=m.employer_name,
-        employee_document_id=m.employee_document_id,
-        employee_name=m.employee_name,
-        period_start=m.period_start,
-        period_end=m.period_end,
-        total_gross_income=m.total_gross_income,
-        income_tax_withheld=m.income_tax_withheld,
+        document_type=m.document_type,
+        doc_date=m.doc_date,
+        doc_number=m.doc_number,
+        vendor_name=m.vendor_name,
+        client_name=m.client_name,
+        total_amount=m.total_amount,
+        tax_amount=m.tax_amount,
         extraction_method=m.extraction_method,
         file_size_bytes=m.file_size_bytes,
         page_count=m.page_count,
         processing_time_ms=m.processing_time_ms,
+        tables=m.tables or [],
         extras=m.extras or {},
     )
 
@@ -88,20 +86,18 @@ class PostgresDocumentRepository(DocumentRepositoryPort):
             id=document.id,
             filename=document.filename,
             upload_date=upload_date,
-            form_type=document.form_type,
-            tax_year=document.tax_year,
-            nit_employer=document.nit_employer,
-            employer_name=document.employer_name,
-            employee_document_id=document.employee_document_id,
-            employee_name=document.employee_name,
-            period_start=document.period_start,
-            period_end=document.period_end,
-            total_gross_income=document.total_gross_income,
-            income_tax_withheld=document.income_tax_withheld,
+            document_type=document.document_type,
+            doc_date=document.doc_date,
+            doc_number=document.doc_number,
+            vendor_name=document.vendor_name,
+            client_name=document.client_name,
+            total_amount=document.total_amount,
+            tax_amount=document.tax_amount,
             extraction_method=document.extraction_method,
             file_size_bytes=document.file_size_bytes,
             page_count=document.page_count,
             processing_time_ms=document.processing_time_ms,
+            tables=document.tables,
             extras=document.extras,
         )
         self._session.add(model)
@@ -130,16 +126,14 @@ class PostgresDocumentRepository(DocumentRepositoryPort):
         )
         model = result.scalar_one_or_none()
         if model:
-            model.form_type = document.form_type
-            model.tax_year = document.tax_year
-            model.nit_employer = document.nit_employer
-            model.employer_name = document.employer_name
-            model.employee_document_id = document.employee_document_id
-            model.employee_name = document.employee_name
-            model.period_start = document.period_start
-            model.period_end = document.period_end
-            model.total_gross_income = document.total_gross_income
-            model.income_tax_withheld = document.income_tax_withheld
+            model.document_type = document.document_type
+            model.doc_date = document.doc_date
+            model.doc_number = document.doc_number
+            model.vendor_name = document.vendor_name
+            model.client_name = document.client_name
+            model.total_amount = document.total_amount
+            model.tax_amount = document.tax_amount
+            model.tables = document.tables
             model.extras = document.extras
             await self._session.commit()
         return document

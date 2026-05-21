@@ -28,32 +28,30 @@ def test_model_to_domain() -> None:
     model = DocumentModel(
         id=uuid4(),
         filename="test.pdf",
-        form_type="220",
-        tax_year=2024,
-        nit_employer="123456789",
-        employer_name="Employer",
-        employee_document_id="987654321",
-        employee_name="Employee",
-        period_start="2024-01-01",
-        period_end="2024-12-31",
-        total_gross_income=50000.0,
-        income_tax_withheld=1000.0,
+        document_type="invoice",
+        doc_date="2024-08-08",
+        doc_number="12345",
+        vendor_name="Vendor Inc",
+        client_name="Client LLC",
+        total_amount=50000.0,
+        tax_amount=1000.0,
         extraction_method="text",
         file_size_bytes=1000,
         page_count=1,
         processing_time_ms=100,
-        extras={"form_number": "123"},
+        tables=[{"description": "Item 1", "total": 50000.0}],
+        extras={"custom_field": "val"},
     )
     domain = _model_to_domain(model)
     assert domain.id == model.id
     assert domain.filename == "test.pdf"
-    assert domain.form_type == "220"
+    assert domain.document_type == "invoice"
 
 
 async def test_repo_save(
     repo: PostgresDocumentRepository, mock_session: AsyncMock
 ) -> None:
-    doc = Document(filename="test.pdf", form_type="220")
+    doc = Document(filename="test.pdf", document_type="invoice")
     result = await repo.save(doc)
     assert result == doc
     mock_session.add.assert_called_once()
@@ -67,7 +65,7 @@ async def test_repo_get_by_id_found(
     model = DocumentModel(
         id=doc_id,
         filename="test.pdf",
-        form_type="220",
+        document_type="invoice",
         extras={},
     )
 
@@ -95,8 +93,12 @@ async def test_repo_get_by_id_not_found(
 async def test_repo_list_all(
     repo: PostgresDocumentRepository, mock_session: AsyncMock
 ) -> None:
-    model1 = DocumentModel(id=uuid4(), filename="file1.pdf", form_type="220", extras={})
-    model2 = DocumentModel(id=uuid4(), filename="file2.pdf", form_type="220", extras={})
+    model1 = DocumentModel(
+        id=uuid4(), filename="file1.pdf", document_type="invoice", extras={}
+    )
+    model2 = DocumentModel(
+        id=uuid4(), filename="file2.pdf", document_type="invoice", extras={}
+    )
 
     mock_result = MagicMock()
     mock_result.scalars().all.return_value = [model1, model2]
@@ -115,7 +117,7 @@ async def test_repo_update_found(
     model = DocumentModel(
         id=doc_id,
         filename="test.pdf",
-        form_type="220",
+        document_type="invoice",
         extras={},
     )
 
@@ -123,10 +125,10 @@ async def test_repo_update_found(
     mock_result.scalar_one_or_none.return_value = model
     mock_session.execute.return_value = mock_result
 
-    doc = Document(id=doc_id, filename="test.pdf", form_type="210")
+    doc = Document(id=doc_id, filename="test.pdf", document_type="receipt")
     result = await repo.update(doc)
-    assert result.form_type == "210"
-    assert model.form_type == "210"
+    assert result.document_type == "receipt"
+    assert model.document_type == "receipt"
     mock_session.commit.assert_called_once()
 
 
@@ -137,7 +139,7 @@ async def test_repo_update_not_found(
     mock_result.scalar_one_or_none.return_value = None
     mock_session.execute.return_value = mock_result
 
-    doc = Document(id=uuid4(), filename="test.pdf", form_type="210")
+    doc = Document(id=uuid4(), filename="test.pdf", document_type="receipt")
     result = await repo.update(doc)
     assert result == doc
     mock_session.commit.assert_not_called()

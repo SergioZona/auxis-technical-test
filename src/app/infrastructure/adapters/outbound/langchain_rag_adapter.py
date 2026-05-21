@@ -51,17 +51,16 @@ async def query_database_tool(sql_query: str) -> str:
     - id (UUID)
     - filename (VARCHAR)
     - upload_date (TIMESTAMP)
-    - form_type (VARCHAR)
-    - tax_year (INTEGER)
-    - nit_employer (VARCHAR)
-    - employer_name (VARCHAR)
-    - employee_name (VARCHAR)
-    - period_start (TIMESTAMP)
-    - period_end (TIMESTAMP)
-    - total_gross_income (FLOAT)
-    - income_tax_withheld (FLOAT)
-    - extraction_method (VARCHAR)
-    - extras (JSONB)
+    - document_type (VARCHAR) - E.g. "invoice", "receipt", "certificate", "other"
+    - doc_date (VARCHAR) - YYYY-MM-DD
+    - doc_number (VARCHAR) - Invoice/receipt/document number
+    - vendor_name (VARCHAR) - Issuing vendor company name
+    - client_name (VARCHAR) - Receiving client company name
+    - total_amount (FLOAT) - Grand total of the invoice/document
+    - tax_amount (FLOAT) - Total tax amount applied
+    - extraction_method (VARCHAR) - "text" | "ocr" | "hybrid"
+    - tables (JSONB) - List of line item dicts (containing description, qty, unit_price, total)
+    - extras (JSONB) - All dynamic/other custom fields extracted from the document
 
     Important: You must only execute read-only queries (SELECT).
     """
@@ -164,11 +163,11 @@ class LangChainRagAdapter(LangChainRagPort):
         tools = [search_documents_tool, query_database_tool]
 
         system_prompt = (
-            "You are a helpful tax and document intelligence assistant.\n\n"
+            "You are a helpful document intelligence and business analytics assistant.\n\n"
             "## Step 1 — Understand the question\n"
             "Read the user's question carefully. Determine:\n"
             "- Does it require semantic search over document text (names, descriptions, content details)?\n"
-            "- Does it require structured data queries (counts, sums, averages, filtering by year/employer)?\n"
+            "- Does it require structured data queries (counts, sums, averages, filtering by vendor, date, or amount)?\n"
             "- Does it require BOTH to give a complete answer?\n\n"
             "## Step 2 — Select and use the right tool(s)\n"
             "You have access to two tools:\n"

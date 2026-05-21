@@ -29,29 +29,26 @@ class DocumentChunk(Entity):
 @dataclass
 class Document(Entity):
     """
-    Canonical domain model for an uploaded tax/income certificate document.
+    Canonical domain model for an uploaded general invoice or business document.
 
     ## Structured columns (query / filter targets)
-    - form_type            – Document type code (\"220\", \"210\", \"invoice\"…)
-    - tax_year             – Año gravable / fiscal year
-    - nit_employer         – NIT of the issuing company
-    - employer_name        – Razón social / company name
-    - employee_document_id – Cédula / ID of the employee
-    - employee_name        – Full name of the employee
-    - period_start         – Start of certification period (YYYY-MM-DD)
-    - period_end           – End of certification period (YYYY-MM-DD)
-    - total_gross_income   – Total ingresos brutos (primary KPI)
-    - income_tax_withheld  – Retención en la fuente (secondary KPI)
+    - document_type        – E.g. "invoice", "receipt", "certificate"
+    - doc_date             – YYYY-MM-DD
+    - doc_number           – Invoice/receipt number
+    - vendor_name          – Company/person issuing the document
+    - client_name          – Company/person receiving the document
+    - total_amount         – Grand total of the invoice
+    - tax_amount           – Total tax amount applied
 
     ## Processing metadata
-    - extraction_method    – \"text\" | \"ocr\" | \"hybrid\"
+    - extraction_method    – "text" | "ocr" | "hybrid"
     - file_size_bytes      – Raw file size in bytes
     - page_count           – Number of pages in the PDF
     - processing_time_ms   – End-to-end parse time in milliseconds
 
-    ## JSONB overflow
-    - extras               – All secondary fields: sub-financials, location,
-                             description, form_number, and anything the AI found.
+    ## JSONB overflow and tables
+    - tables               – Extracted structured tables (line items)
+    - extras               – All dynamic / other fields extracted from the invoice
     """
 
     id: UUID = field(default_factory=uuid4)
@@ -60,17 +57,14 @@ class Document(Entity):
         default_factory=lambda: datetime.now(UTC).replace(tzinfo=None)
     )
 
-    # ── 10 canonical columns ──────────────────────────────────────────────────
-    form_type: str | None = None
-    tax_year: int | None = None
-    nit_employer: str | None = None
-    employer_name: str | None = None
-    employee_document_id: str | None = None
-    employee_name: str | None = None
-    period_start: str | None = None
-    period_end: str | None = None
-    total_gross_income: float | None = None
-    income_tax_withheld: float | None = None
+    # ── 7 canonical columns ───────────────────────────────────────────────────
+    document_type: str | None = None
+    doc_date: str | None = None
+    doc_number: str | None = None
+    vendor_name: str | None = None
+    client_name: str | None = None
+    total_amount: float | None = None
+    tax_amount: float | None = None
 
     # ── Processing metadata ───────────────────────────────────────────────────
     extraction_method: str | None = None  # "text" | "ocr" | "hybrid"
@@ -78,7 +72,8 @@ class Document(Entity):
     page_count: int | None = None
     processing_time_ms: int | None = None
 
-    # ── JSONB overflow ────────────────────────────────────────────────────────
+    # ── JSONB fields ──────────────────────────────────────────────────────────
+    tables: list[dict[str, Any]] = field(default_factory=list)
     extras: dict[str, Any] = field(default_factory=dict)
 
     # ── Vector search chunks ──────────────────────────────────────────────────
@@ -92,20 +87,18 @@ class Document(Entity):
             "id",
             "filename",
             "upload_date",
-            "form_type",
-            "tax_year",
-            "nit_employer",
-            "employer_name",
-            "employee_document_id",
-            "employee_name",
-            "period_start",
-            "period_end",
-            "total_gross_income",
-            "income_tax_withheld",
+            "document_type",
+            "doc_date",
+            "doc_number",
+            "vendor_name",
+            "client_name",
+            "total_amount",
+            "tax_amount",
             "extraction_method",
             "file_size_bytes",
             "page_count",
             "processing_time_ms",
+            "tables",
             "extras",
             "chunks",
         }

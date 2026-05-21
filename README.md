@@ -1,12 +1,12 @@
 # 🗃️ Hybrid Agentic RAG System — Document Intelligence Platform
 
-[![CI Pipeline](https://github.com/SergioZona/auxis-technical-test/actions/workflows/ci.yml/badge.svg)](https://github.com/SergioZona/auxis-technical-test/actions)
-[![Quality Gate Status](https://sonar.zonahub.dev/api/project_badges/measure?project=auxis-technical-test&metric=alert_status&token=sqb_8a749c1754ea8a5c08e50a501d7c326c8e10bbaa)](https://sonar.zonahub.dev/dashboard?id=auxis-technical-test)
-[![Coverage Status](https://sonar.zonahub.dev/api/project_badges/measure?project=auxis-technical-test&metric=coverage&token=sqb_8a749c1754ea8a5c08e50a501d7c326c8e10bbaa)](https://sonar.zonahub.dev/dashboard?id=auxis-technical-test)
+[![CI Pipeline](https://github.com/SergioZona/invoice-hybrid-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/SergioZona/invoice-hybrid-rag/actions)
+[![Quality Gate Status](https://sonar.zonahub.dev/api/project_badges/measure?project=invoice-hybrid-rag&metric=alert_status&token=sqb_088069b6bdbd9d1a2d9781e750c550e8060f2a01)](https://sonar.zonahub.dev/dashboard?id=invoice-hybrid-rag)
+[![Coverage](https://sonar.zonahub.dev/api/project_badges/measure?project=invoice-hybrid-rag&metric=coverage&token=sqb_088069b6bdbd9d1a2d9781e750c550e8060f2a01)](https://sonar.zonahub.dev/dashboard?id=invoice-hybrid-rag)
 [![Python Version](https://img.shields.io/badge/python-3.14%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](#)
 
-I designed and built this state-of-the-art **Document Intelligence & Hybrid Agentic RAG Platform** to ingest complex PDF tax certificates, extract structured metadata, generate dense vector embeddings, and support natural language reasoning using dynamic tool-calling.
+I designed and built this state-of-the-art **Document Intelligence & Hybrid Agentic RAG Platform** to ingest complex PDF invoices and business documents, extract structured metadata, generate dense vector embeddings, and support natural language reasoning using dynamic tool-calling.
 
 ---
 
@@ -35,11 +35,47 @@ Once running, you can access the following local endpoints:
 
 ## 🎥 Video Demo
 
-*Please click the link below to watch a video walk-through of the system in action, demonstrating PDF document ingestion, structured schema parsing, relational validation, and agentic multi-turn query execution:*
+Work in progress.
 
-[▶️ Watch the System Walkthrough Video Demo](https://github.com/SergioZona/auxis-technical-test/)
+---
 
-*(Or check the local documentation files in [docs/](file:///c:/Users/Sergio%20Julian%20Zona%20M/Desktop/Repositorios/Proyectos%20externos/auxis-technical-test/docs/) for visual workflow guides).*
+## 📊 Business Canonical Schema & Dynamic Open-Schema
+
+To maximize flexibility when parsing highly variable business documents and invoices, the platform uses a hybrid **Fixed-Relational + Dynamic JSONB (Open-Schema)** representation. Instead of demanding a database schema migration for every unique vendor invoice template, we isolate critical analytical properties into canonical columns and offload all other variables into open JSONB fields.
+
+### 1. The 7 Structured Canonical Columns
+Every processed document is automatically resolved into these 7 relational fields in the PostgreSQL database. This facilitates sub-millisecond sorting, grouping, and filtering:
+
+| Canonical Field | Description | `Sample Invoice Template.pdf` Value |
+| :--- | :--- | :--- |
+| **`document_type`** | General classification of the document | `"invoice"` |
+| **`doc_date`** | Standardized transaction date (YYYY-MM-DD) | `"2024-08-08"` |
+| **`doc_number`** | Invoice or statement serial number | `"76543"` |
+| **`vendor_name`** | Issuing company or professional service | `"COMPANY NAME"` |
+| **`client_name`** | Recipient entity or billing department | `"<Client Company Name>"` |
+| **`total_amount`** | Grand total (balance due) of the invoice | `20.27` |
+| **`tax_amount`** | Aggregated tax value applied | `1.28` |
+
+### 2. Tabular Line Items Extraction (`tables` JSONB Column)
+For structured items list (like rows in an invoice template containing quantity, description, unit price, and total), the system parses them into an open-schema array of maps (`tables`). This avoids complex relational table normalization while preserving queryability:
+```json
+[
+  {"description": "Item 1", "quantity": 1, "unit_price": 5.00, "total": 5.00},
+  {"description": "Item 2", "quantity": 1, "unit_price": 7.00, "total": 7.00},
+  {"description": "Item 3", "quantity": 1, "unit_price": 6.00, "total": 6.00}
+]
+```
+
+### 3. Open-Schema JSONB Overflow (`extras` Column)
+All other fields extracted by the Gemini LLM that are not part of the 7 canonical columns are placed in an unconstrained `extras` JSONB map. Users can dynamically add, update, or remove key-value attributes via the Streamlit UI without altering database tables.
+For the `Sample Invoice Template.pdf` example, `extras` captures:
+* **`subtotal`**: `18.00`
+* **`discount`**: `2.00`
+* **`subtotal_less_discount`**: `16.00`
+* **`tax_rate`**: `"8%"`
+* **`shipping_handling`**: `2.99`
+* **`payment_terms`**: `"due within Net 30 days"`
+* **`payment_instructions`**: `"Venmo: <venmo account> or Paypal: <paypal account>"`
 
 ---
 
@@ -82,68 +118,7 @@ graph LR
 
 
 
-### B. Component Architecture Diagram
-
-The component diagram details how discrete logical parts of the Streamlit frontend, FastAPI backend, vectorizers, and database layer integrate with each other, along with DevOps and telemetry layers:
-
-```mermaid
-graph TD
-    subgraph DevOps_QA ["DevOps & Continuous Quality (CI/CD)"]
-        GHA[GitHub Actions CI/CD] -->|Trigger Quality Gate| Sonar[SonarQube Quality Gate]
-        GHA -->|Deploys to| Dokploy[Dokploy VPS Engine]
-    end
-
-    subgraph Streamlit_UI ["Streamlit Frontend UI Component"]
-        Dashboard[Dashboard View]
-        Uploader[File Ingest Component]
-        ChatUI[Conversational Interface]
-        Viewer[Human-in-the-Loop Validation Viewer]
-    end
-
-    subgraph FastAPI_Backend ["FastAPI Backend Core Component"]
-        Auth[Basic Auth Security Handler]
-        Router[Document & RAG Router]
-        UseCases[Application Use Cases Layer]
-        Parser[Document Parser Service]
-        Agent[LangChain Agentic Orchestrator]
-    end
-
-    subgraph Telemetry ["Observability"]
-        LS[LangSmith Cloud Telemetry]
-    end
-
-    subgraph Infrastructure_Adapters ["Ports & Adapters Adapters Layer"]
-        PG_Adapter[SQLAlchemy Postgres Adapter]
-        QD_Adapter[Qdrant Client Adapter]
-        Embed[FastEmbed Embedding Adapter]
-    end
-
-    subgraph Databases_Infrastructure ["Data Storage & External Services"]
-        Postgres[(PostgreSQL 17 DB)]
-        Qdrant[(Qdrant Vector DB)]
-        Gemini[Gemini 2.5 Flash API]
-    end
-
-    Dokploy -->|Hosts Containers| Streamlit_UI
-    Dokploy -->|Hosts Containers| FastAPI_Backend
-
-    Uploader -->|HTTP POST Multipart| Router
-    ChatUI -->|HTTP POST Query| Router
-    Router --> Auth
-    Router --> UseCases
-    UseCases --> Parser
-    UseCases --> Agent
-    Parser --> Embed
-    Agent --> Embed
-    Embed --> QD_Adapter
-    QD_Adapter -->|Port 6333 / Vector Ops| Qdrant
-    Agent --> PG_Adapter
-    PG_Adapter -->|Port 5432 / SQL Ops| Postgres
-    Agent --> Gemini
-    Agent -.->|Real-Time Tracing| LS
-```
-
-### C. Detailed Module & Hexagonal Architecture Flow
+### B. Detailed Module & Hexagonal Architecture Flow
 
 To ensure high modularity and maintainability, I isolated the core business rules from external technologies. Control flows through outbound ports, which are implemented by exchangeable infrastructure adapters, with complete DevOps deployment and monitoring tracing:
 
@@ -205,7 +180,7 @@ graph TB
 * **Backend (FastAPI)**: I selected FastAPI due to its asynchronous runtime (ASGI) support, enabling highly concurrent processing during document upload spikes.
 * **Orchestration (LangChain Agent)**: I integrated a tool-calling reasoning agent that parses conversational queries, decides whether to query PostgreSQL (using SQL tools) or Qdrant (using semantic search tools), and synthesizes a citation-rich response.
 * **Vector Store (Qdrant)**: I deployed Qdrant because of its sub-millisecond similarity search speeds and low resource utilization.
-* **Relational DB (Postgres 17)**: Structured metadata storage featuring a strict relational schema alongside a **JSONB open-schema column** to ingest dynamic tax certificate fields without schema migrations.
+* **Relational DB (Postgres 17)**: Structured metadata storage featuring a strict relational schema alongside a **JSONB open-schema column** (`extras`) and structured tabular lists (`tables`) to ingest dynamic business invoice fields without schema migrations.
 * **AI Inference (Gemini 2.5 Flash)**: I leveraged the Gemini 2.5 Flash model through Google's official AI SDK as the agentic model, providing high reasoning speeds, generous rate limits, and solid code-generation tools.
 * **FastEmbed In-Memory Offloading**: I offloaded vector generation to local CPU-bound threads managed by FastEmbed, wrapping executions in `asyncio.run_in_executor` to keep the FastAPI main async event loop unblocked.
 
@@ -221,7 +196,7 @@ I designed and engineered the retrieval engine of this platform around a state-o
 Standard RAG pipelines rely solely on unstructured dense retrieval (vector database lookups). While excellent for answering conceptual questions ("What is the process for X?"), pure vector search is notoriously fragile when handling structured financial data, precise numerical aggregation, and strict relational filtering. For example, a vector search looking up *"What is the sum of Sergio's gross income in 2026?"* will often hallucinate or retrieve unrelated tax rows, because math operations and precise equality filters are outside the capabilities of dense vector spaces.
 
 To mitigate this bottleneck, my system splits the knowledge representation into a dual-storage paradigm:
-*   **Structured Relational Schema (PostgreSQL 17):** Captures high-precision, strict schema items (tax year, employee name, document classification, filing status) and stores variable dynamic tax lines in an **open-schema JSONB column**. This ensures 100% mathematical accuracy and strict querying capability for quantitative, relational questions.
+*   **Structured Relational Schema (PostgreSQL 17):** Captures high-precision, strict canonical fields (document type, date, number, vendor, client, totals), dynamic line item lists (`tables`), and arbitrary dynamic attributes in an **open-schema JSONB extras column**. This ensures 100% mathematical accuracy and strict querying capability for quantitative, relational questions.
 *   **Unstructured Vector Index (Qdrant DB):** Stores high-fidelity recursive semantic text chunks vectorized via local **BAAI/bge-small-en-v1.5** embeddings. This preserves semantic nuance, explanatory footnotes, and structural sections.
 
 #### 2. Why "Agentic"?
@@ -245,21 +220,21 @@ sequenceDiagram
     participant PG as PostgreSQL
     participant QD as Qdrant Vector DB
 
-    User->>Streamlit: Asks: "What is the total gross income of Sergio in 2026?"
+    User->>Streamlit: Asks: "What is the total amount spent on invoices from COMPANY NAME?"
     Streamlit->>Fast: POST /api/v1/documents/query (question)
     Fast->>LC: Execute ask_rag_question(question)
     Note over LC: Agent analyzes question:<br/>Needs structured sum + semantic verification
     
     rect rgba(0, 122, 255, 0.05)
         Note over LC: Agent decides to use SQL tool
-        LC->>PG: SELECT sum(total_gross_income) FROM documents WHERE employee_name ILIKE '%Sergio%' AND tax_year = 2026;
-        PG-->>LC: Return total: $150,000
+        LC->>PG: SELECT sum(total_amount) FROM documents WHERE vendor_name ILIKE '%COMPANY NAME%';
+        PG-->>LC: Return total: $20.27
     end
 
     rect rgba(52, 199, 89, 0.05)
         Note over LC: Agent decides to verify semantic details
-        LC->>QD: Search semantic chunks for "Sergio gross income 2026"
-        QD-->>LC: Return text chunks (verified income entries, page 2)
+        LC->>QD: Search semantic chunks for "COMPANY NAME invoice details"
+        QD-->>LC: Return text chunks (verified item entries, subtotal less discount, page 1)
     end
 
     Note over LC: Agent synthesizes observations and answers
@@ -270,7 +245,7 @@ sequenceDiagram
 
 ### 🚀 Parallel Processing & Bottleneck Mitigation
 
-Ingesting large tax document batches poses critical bottlenecks: heavy network I/O during LLM parsing/LLM tool calls and CPU saturation during vector calculation. 
+Ingesting large document batches poses critical bottlenecks: heavy network I/O during LLM parsing/LLM tool calls and CPU saturation during vector calculation. 
 
 To solve this, I designed a non-blocking asynchronous pipeline:
 1. **Asynchronous Batching**: The FastAPI ingestion endpoints schedule document processing concurrently using Python's standard `asyncio.gather`. 
@@ -289,7 +264,7 @@ To index documents into a vector space, raw text must be split into chunks. I se
 
 | Chunking Strategy | Mechanism | Pros | Cons | Suitability for Tax Certificates |
 | :--- | :--- | :--- | :--- | :--- |
-| **Recursive Character Splitting** *(Used)* | Recursively splits by `\n\n`, `\n`, ` `, and `""` to stay under length constraints. | Preserves semantic paragraph bounds, keeps list structures and rows together. | Overhead from iterative calculations. | **High (9.5/10)**: Prevents numerical entries in tax rows from losing their context. |
+| **Recursive Character Splitting** *(Used)* | Recursively splits by `\n\n`, `\n`, ` `, and `""` to stay under length constraints. | Preserves semantic paragraph bounds, keeps list structures and rows together. | Overhead from iterative calculations. | **High (9.5/10)**: Prevents numerical entries in line item rows from losing their context. |
 | **Fixed-Size Chunking** | Blindly splits at fixed character thresholds (e.g. every 500 characters). | Computationally trivial and fast. | Cuts sentences, tables, and important numbers in half. | **Low (2/10)**: Frequently breaks financial numbers from their labels. |
 | **Semantic Chunking** | Splits based on embedding similarity shifts between adjacent sentences. | Excellent semantic cohesion. | Very slow and expensive (requires constant embedding calls). | **Medium (6/10)**: Highly precise, but excessive latency blocks fast user uploads. |
 | **Page-by-Page Chunking** | Hard splits at PDF page boundaries. | Highly intuitive; aligns directly with visual pages. | Large pages exceed LLM token windows; breaks sentences on page cuts. | **Low (4/10)**: Page boundaries are arbitrary relative to long financial tables. |
@@ -337,18 +312,12 @@ graph LR
 ```
 
 ### Azure Services Mapping
-1. **Azure Front Door / CDN**: Global entry point providing low-latency caching, Web Application Firewall (WAF) threat protection, and SSL offloading.
-2. **Azure Container Apps (ACA)**: Serverless container platform hosting the Streamlit UI and FastAPI backend, enabling autoscale-to-zero configurations based on HTTP load.
-3. **Azure API Management (APIM)**: Protects, routes, and throttles API endpoints, handling authentication, rate limiting, and analytics.
-4. **Azure Database for PostgreSQL (Flexible Server)**: Fully managed relational database with high availability, automated backups, and built-in pgvector support.
-5. **Azure Blob Storage**: Secure object storage used to store raw uploaded source PDF files.
-6. **Azure AI Search or Scalable Qdrant in ACA**: Scaled semantic vector indices. I can run Qdrant in a multi-node ACA deployment using Azure Files mounts for persistent volumes.
-7. **Azure OpenAI Service / Azure ML**: Enterprise-grade LLM inference endpoints with privacy compliance and high SLA token throughput.
-
-**AKS (Azure Kubernetes Service) Alternative**: Deploying on AKS is fully supported and offers granular resource replication. However, AKS introduces cluster management overhead, ingress controller configurations, and storage class complexities that Azure Container Apps (ACA) completely abstract away.
+* **Compute**: **Azure Container Apps (ACA)** hosts Streamlit and FastAPI microservices with serverless auto-scaling.
+* **Storage**: **Azure Blob Storage** for raw PDFs, **Azure Database for PostgreSQL (Flexible Server)** for relational columns, and **Qdrant on ACA** for vector indexing.
+* **AI & Gateway**: **Azure OpenAI Service** for secure reasoning, and **Azure API Management** to route and secure endpoints.
 
 ### 🛠️ Infrastructure as Code (IaC): Terraform for AKS
-To address the complexity of AKS deployment, I wrote a comprehensive, declarative Terraform blueprint located at [docker/aks-infrastructure/main.tf](file:///c:/Users/Sergio%20Julian%20Zona%20M/Desktop/Repositorios/Proyectos%20externos/auxis-technical-test/docker/aks-infrastructure/main.tf). 
+To address the complexity of AKS deployment, I wrote a comprehensive, declarative Terraform blueprint located at `docker/aks-infrastructure/main.tf`. 
 
 This script automates the complete provisioning of:
 * A secure Virtual Network (VNet) with delegated database and compute subnets.
@@ -401,86 +370,40 @@ In the remote VPS environment managed by Dokploy, direct public exposure of data
 #### Recommended: DBeaver SSH Tunneling (PostgreSQL)
 SSH Tunneling allows DBeaver to route PostgreSQL traffic securely through the server's SSH gateway without opening port `5432` to the public:
 
-1. Open DBeaver and select **PostgreSQL**.
-2. Set the **Host** to `localhost` (this refers to localhost *relative to the VPS server*).
-3. Set **Port** to `5432`.
-4. Go to the **SSH** tab:
-   * Check **Use SSH Tunnel**.
-   * **Host/IP**: `192.145.37.241` (VPS IP)
-   * **Port**: `22`
-   * **Username**: `root` (or your VPS deployment user)
-   * **Authentication Method**: Select **Private Key** and upload your SSH private key file.
-5. Save, click **Test Connection**, and open DBeaver.
-
-#### Remote Qdrant Web Dashboard Access
-I set up a routing subdomain in Dokploy's reverse proxy (Traefik) to provide secure HTTPS access to the remote Qdrant dashboard:
-* **Dashboard URL**: `https://qdrant-auxis-technical-test.zonahub.dev/dashboard`
-
----
-
-### Ingestion Local Run Commands
-Launch the entire system locally with a single command:
-
+### Local Docker Ingestion
+Launch the entire system locally:
 ```bash
-# 1. Start all infrastructure services (Postgres, Qdrant) and application services (FastAPI, Streamlit UI)
 docker compose --env-file docker/.env -f docker/docker-compose.yml up -d --build
-
-# 2. View running containers and verify their health status
-docker ps
-
-# 3. Access the Streamlit Dashboard locally
-# Streamlit UI: http://localhost:8501
-# FastAPI API Swagger docs: http://localhost:8000/docs
 ```
 
 ---
 
 ## 🧪 6. Testing, Quality & CI/CD
 
-I enforce high quality standards through rigorous automated testing:
+The CI/CD pipeline runs on every push and pull request via GitHub Actions, enforcing automated testing, type checking, and quality gates.
 
 ```bash
-# 1. Run all unit and integration tests with coverage checking (enforcing >80% coverage)
-uv run pytest --cov=src --cov-report=term-missing
-
-# 2. Run static type analysis using MyPy
+# Run tests, types, and formatters
+uv run pytest --cov=src
 uv run mypy src/
-
-# 3. Check and format code structure with Ruff
 uv run ruff check src/ tests/
 uv run ruff format --check src/ tests/
 ```
 
-The CI/CD pipeline runs on every push and pull request via GitHub Actions, integrating with **SonarQube** on my Dokploy cloud server to analyze static code metrics, verify code smells, check duplicate lines, and enforce the quality gate before merging.
+---
+
+## 🧗 7. Key Tradeoffs & Decisions
+
+* **Security & Auth**: Basic authentication is used between the Streamlit UI and FastAPI backend as a lightweight, strategic constraint for decoupled microservice communication.
+* **Extraction Strategy**: Fast, native extraction is prioritized using PyMuPDF, skipping heavy OCR visual reconciliation pipelines unless documents are non-selectable scans.
+* **Dedicated Vector DB**: Running a dedicated Qdrant instance offloads high-speed similarity search workloads, keeping transactional PostgreSQL connections unburdened.
 
 ---
 
-## 🧠 7. Context Engineering & Software-Driven Development (SDD)
+## 🚀 8. Future Roadmap
 
-* **Context Engineering Focus**: In modern agentic AI development, maintaining clean, precise context is critical. This project focuses on **token minimization and relevance optimization**.
-* **The `.agents/` Folder**: I introduced standardized context directories designed to save developer tokens by caching structural state and project instructions locally. 
-* **Software-Driven Development (SDD)**: A methodology where all code generation, refactoring, and debugging cycles are controlled by formal technical blueprints and knowledge graph definitions, ensuring high predictability and zero regression rates.
-
----
-
-## 🧗 8. Challenges & Overkill Decisions
-
-* **Basic Auth Selection Tradeoff**: I implemented basic authentication between the Streamlit UI and the FastAPI backend. While standard production systems favor OAuth2/OIDC, basic auth was selected as a strategic, lightweight constraint to maintain simple, fast coupling without complex cookie-exchange mechanisms.
-* **OCR Reconciliation Overkill**: During early iterations, I experimented with using OCR to reconstruct PDF documents side-by-side with structured extraction from Gemini API. This proved to be an **overkill architectural decision**. The standard PyMuPDF parser was more than sufficient, making heavy visual reconciliation pipelines unnecessary.
-* **Qdrant Vector Database Selection**: I selected Qdrant for its extremely small container resource footprint and its built-in dashboard. While PGVector is native to Postgres, running a separate high-speed vector engine allows for specialized search pipelines without overloading transactional DB connections.
-
----
-
-## 🚀 9. Future Architectural Improvements Roadmap
-
-1. **RAG BI Interactive Dashboard**: Introducing interactive BI plotting capabilities (leveraging Streamlit native charting components or LangGraph UI visualization integrations) to view real-time document analytics, parsing trends, and token costs directly from the dashboard.
-2. **Conversational Session Memory**: Adding native conversational session history memory inside the LangChain tool agent, enabling multi-turn context retention across conversation rounds.
-3. **Semantic Caching**: Integrating a semantic cache (e.g. GPTCache or custom Redis vector caching) for query-to-vector responses to intercept incoming prompts at the gateway, avoiding expensive LLM API calls and vector search loops for repeated questions.
-4. **Streamlit & Relational Caching**: Implementing state caching on Postgres queries and API-level cache headers to optimize concurrent dashboard updates.
-5. **Dead Letter Queue (DLQ) & Robust Retries**: Adding DLQs to handle malformed document extraction gracefully, integrating exponential backoff retry strategies on failed API calls.
-6. **Event-Driven Processing**: Introducing **RabbitMQ / Celery / Redis** to offload PDF parsing and vector generation into background tasks, preventing API timeouts when batch-ingesting hundreds of files.
-7. **Scalable Self-Hosted SLMs**: Offloading inference tasks from external APIs (like Gemini) to scalable self-hosted Small Language Models (e.g., Llama-3-8B-Instruct via vLLM) hosted on internal GPU instances.
-8. **OpenTelemetry, Grafana & SumoLogic**: Comprehensive observability with OpenTelemetry tracing spans exported to Grafana and SumoLogic for detailed runtime performance monitoring.
-9. **Prompt Versioning & Monitoring**: Integrating **MLFlow** and **Opik** to track prompt versions, evaluate response drift, and monitor costs.
-10. **ZenML ETL Pipelines**: Scaling ingestion workflows into ZenML pipelines to support repeatable, production-grade vector data pipelines.
-11. **Kubernetes Cluster (AKS)**: Deploying the application inside Azure Kubernetes Service (AKS) to scale services independently with robust pod replication.
+1. **Interactive BI Analytics**: Real-time spending charts and custom analytics directly inside the Streamlit dashboard.
+2. **Conversational Memory**: Native stateful context retention inside the LangChain tool agent for multi-turn chats.
+3. **Semantic Caching**: Vector-based query caching to bypass LLM execution for duplicate/similar prompts.
+4. **Queue Processing**: Event-driven background ingestion (Celery/Redis) to handle massive PDF batch uploads without API timeouts.
+5. **Production Observability**: Full OpenTelemetry spans exported to Grafana and SumoLogic alongside LangSmith telemetry.

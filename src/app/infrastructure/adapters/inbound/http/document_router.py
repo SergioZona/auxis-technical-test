@@ -43,25 +43,14 @@ def _map_document_to_dict(doc: Any) -> dict[str, Any]:
         "filename": doc.filename,
         "upload_date": doc.upload_date.isoformat() if doc.upload_date else None,
         "extraction_method": doc.extraction_method,
-        "form_type": doc.form_type,
-        "form_number": extras.get("form_number"),
-        "tax_year": doc.tax_year,
-        "nit_employer": doc.nit_employer,
-        "employer_name": doc.employer_name,
-        "employee_document_id": doc.employee_document_id,
-        "employee_name": doc.employee_name,
-        "location": extras.get("location"),
-        "period_start": doc.period_start,
-        "period_end": doc.period_end,
-        "total_gross_income": doc.total_gross_income,
-        "salary_payments": extras.get("salary_payments"),
-        "social_benefits": extras.get("social_benefits"),
-        "other_income_payments": extras.get("other_income_payments"),
-        "health_contributions": extras.get("health_contributions"),
-        "pension_contributions": extras.get("pension_contributions"),
-        "average_monthly_income": extras.get("average_monthly_income"),
-        "income_tax_withheld": doc.income_tax_withheld,
-        "total_annual_withholding": extras.get("total_annual_withholding"),
+        "document_type": doc.document_type,
+        "doc_date": doc.doc_date,
+        "doc_number": doc.doc_number,
+        "vendor_name": doc.vendor_name,
+        "client_name": doc.client_name,
+        "total_amount": doc.total_amount,
+        "tax_amount": doc.tax_amount,
+        "tables": doc.tables or [],
         "chunks_processed": len(doc.chunks) if doc.chunks else 0,
         "others": extras,
     }
@@ -254,38 +243,46 @@ async def update_document(
         raise HTTPException(status_code=404, detail="Document not found")
 
     # Apply updates
-    if "form_type" in updates:
-        doc.form_type = updates["form_type"]
-    if "tax_year" in updates:
-        doc.tax_year = updates["tax_year"]
-    if "nit_employer" in updates:
-        doc.nit_employer = updates["nit_employer"]
-    if "employer_name" in updates:
-        doc.employer_name = updates["employer_name"]
-    if "employee_name" in updates:
-        doc.employee_name = updates["employee_name"]
-    if "total_gross_income" in updates:
-        doc.total_gross_income = updates["total_gross_income"]
-    if "income_tax_withheld" in updates:
-        doc.income_tax_withheld = updates["income_tax_withheld"]
+    if "document_type" in updates:
+        doc.document_type = updates["document_type"]
+    if "doc_date" in updates:
+        doc.doc_date = updates["doc_date"]
+    if "doc_number" in updates:
+        doc.doc_number = updates["doc_number"]
+    if "vendor_name" in updates:
+        doc.vendor_name = updates["vendor_name"]
+    if "client_name" in updates:
+        doc.client_name = updates["client_name"]
+    if "total_amount" in updates:
+        doc.total_amount = updates["total_amount"]
+    if "tax_amount" in updates:
+        doc.tax_amount = updates["tax_amount"]
+    if "tables" in updates:
+        doc.tables = updates["tables"]
 
-    # Update extras
-    if not doc.extras:
-        doc.extras = {}
-    for key in [
-        "form_number",
-        "employee_document_id",
-        "location",
-        "salary_payments",
-        "social_benefits",
-        "other_income_payments",
-        "health_contributions",
-        "pension_contributions",
-        "average_monthly_income",
-        "total_annual_withholding",
-    ]:
-        if key in updates:
-            doc.extras[key] = updates[key]
+    # Update extras dynamically
+    if "extras" in updates and isinstance(updates["extras"], dict):
+        if not doc.extras:
+            doc.extras = {}
+        for key, val in updates["extras"].items():
+            doc.extras[key] = val
+
+    # Also allow direct root updates for extra fields not in canonical
+    for key, val in updates.items():
+        if key not in {
+            "document_type",
+            "doc_date",
+            "doc_number",
+            "vendor_name",
+            "client_name",
+            "total_amount",
+            "tax_amount",
+            "tables",
+            "extras",
+        }:
+            if not doc.extras:
+                doc.extras = {}
+            doc.extras[key] = val
 
     await repository.update(doc)
     return success({"message": "Document updated successfully"})

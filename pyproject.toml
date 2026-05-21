@@ -1,5 +1,5 @@
 [project]
-name = "auxis-technical-test"
+name = "invoice-hybrid-rag"
 version = "1.0.0"
 description = "Production-ready RAG"
 readme = "README.md"

@@ -50,7 +50,9 @@ async def test_client(test_app) -> AsyncClient:
 async def test_upload_documents_success(
     test_client: AsyncClient, mock_process_use_case: AsyncMock
 ) -> None:
-    doc = Document(filename="test.pdf", form_type="220", extraction_method="text")
+    doc = Document(
+        filename="test.pdf", document_type="invoice", extraction_method="text"
+    )
     mock_process_use_case.execute.return_value = [doc]
 
     # Mock PostgresDocumentRepository to avoid real DB execution
@@ -72,7 +74,7 @@ async def test_upload_documents_success(
 
 @pytest.mark.anyio
 async def test_list_documents_success(test_client: AsyncClient) -> None:
-    doc = Document(filename="test.pdf", form_type="220")
+    doc = Document(filename="test.pdf", document_type="invoice")
 
     with patch(
         "app.infrastructure.adapters.inbound.http.document_router.PostgresDocumentRepository"
@@ -148,7 +150,7 @@ async def test_get_document_pdf_success(test_client: AsyncClient) -> None:
 @pytest.mark.anyio
 async def test_update_document_success(test_client: AsyncClient) -> None:
     doc_id = uuid4()
-    doc = Document(id=doc_id, filename="test.pdf", form_type="220")
+    doc = Document(id=doc_id, filename="test.pdf", document_type="invoice")
 
     with patch(
         "app.infrastructure.adapters.inbound.http.document_router.PostgresDocumentRepository"
@@ -157,14 +159,14 @@ async def test_update_document_success(test_client: AsyncClient) -> None:
         mock_repo.get_by_id = AsyncMock(return_value=doc)
         mock_repo.update = AsyncMock(return_value=doc)
 
-        payload = {"form_type": "210"}
+        payload = {"document_type": "receipt"}
         response = await test_client.patch(f"/api/v1/documents/{doc_id}", json=payload)
 
         assert response.status_code == 200
         body = response.json()
         assert body["status"] == "success"
         assert body["data"]["message"] == "Document updated successfully"
-        assert doc.form_type == "210"
+        assert doc.document_type == "receipt"
 
 
 @pytest.mark.anyio
@@ -298,13 +300,13 @@ async def test_update_document_all_fields_success(test_client: AsyncClient) -> N
     doc = Document(
         id=doc_id,
         filename="test.pdf",
-        form_type="220",
-        tax_year=2023,
-        nit_employer="123",
-        employer_name="Old",
-        employee_name="Old Employee",
-        total_gross_income=100.0,
-        income_tax_withheld=10.0,
+        document_type="invoice",
+        doc_date="2023-01-01",
+        doc_number="123",
+        vendor_name="Old",
+        client_name="Old Employee",
+        total_amount=100.0,
+        tax_amount=10.0,
         extras={"existing": "data"},
     )
 
@@ -316,35 +318,26 @@ async def test_update_document_all_fields_success(test_client: AsyncClient) -> N
         mock_repo.update = AsyncMock(return_value=doc)
 
         updates = {
-            "form_type": "210",
-            "tax_year": 2024,
-            "nit_employer": "456",
-            "employer_name": "New",
-            "employee_name": "New Employee",
-            "total_gross_income": 200.0,
-            "income_tax_withheld": 20.0,
-            "form_number": "123",
-            "employee_document_id": "emp123",
-            "location": "Bogota",
-            "salary_payments": 150.0,
-            "social_benefits": 30.0,
-            "other_income_payments": 20.0,
-            "health_contributions": 10.0,
-            "pension_contributions": 12.0,
-            "average_monthly_income": 180.0,
-            "total_annual_withholding": 20.0,
+            "document_type": "receipt",
+            "doc_date": "2024-01-01",
+            "doc_number": "456",
+            "vendor_name": "New",
+            "client_name": "New Employee",
+            "total_amount": 200.0,
+            "tax_amount": 20.0,
+            "extras": {"existing": "data", "new_extra": "new_val"},
+            "custom_field": "val",
         }
 
         response = await test_client.patch(f"/api/v1/documents/{doc_id}", json=updates)
         assert response.status_code == 200
-        assert doc.form_type == "210"
-        assert doc.tax_year == 2024
-        assert doc.nit_employer == "456"
-        assert doc.employer_name == "New"
-        assert doc.employee_name == "New Employee"
-        assert doc.total_gross_income == 200.0
-        assert doc.income_tax_withheld == 20.0
-        assert doc.extras["form_number"] == "123"
-        assert doc.extras["employee_document_id"] == "emp123"
-        assert doc.extras["location"] == "Bogota"
-        assert doc.extras["salary_payments"] == 150.0
+        assert doc.document_type == "receipt"
+        assert doc.doc_date == "2024-01-01"
+        assert doc.doc_number == "456"
+        assert doc.vendor_name == "New"
+        assert doc.client_name == "New Employee"
+        assert doc.total_amount == 200.0
+        assert doc.tax_amount == 20.0
+        assert doc.extras["existing"] == "data"
+        assert doc.extras["new_extra"] == "new_val"
+        assert doc.extras["custom_field"] == "val"

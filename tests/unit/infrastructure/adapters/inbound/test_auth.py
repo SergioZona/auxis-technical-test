@@ -9,7 +9,7 @@ from app.infrastructure.adapters.inbound.http.auth import require_api_token
 
 def test_require_api_token_anonymous_if_empty_settings() -> None:
     mock_settings = MagicMock()
-    mock_settings.api_username = "auxis"
+    mock_settings.api_username = "admin"
     mock_settings.api_password = ""
 
     with patch(
@@ -22,8 +22,8 @@ def test_require_api_token_anonymous_if_empty_settings() -> None:
 
 def test_require_api_token_raises_401_if_credentials_missing() -> None:
     mock_settings = MagicMock()
-    mock_settings.api_username = "auxis"
-    mock_settings.api_password = "AuxisPassword123!"
+    mock_settings.api_username = "admin"
+    mock_settings.api_password = "AdminPassword123!"
 
     with patch(
         "app.infrastructure.adapters.inbound.http.auth.get_settings",
@@ -38,10 +38,10 @@ def test_require_api_token_raises_401_if_credentials_missing() -> None:
 
 def test_require_api_token_raises_401_if_credentials_invalid() -> None:
     mock_settings = MagicMock()
-    mock_settings.api_username = "auxis"
-    mock_settings.api_password = "AuxisPassword123!"
+    mock_settings.api_username = "admin"
+    mock_settings.api_password = "AdminPassword123!"
 
-    credentials = HTTPBasicCredentials(username="auxis", password="wrongpassword")
+    credentials = HTTPBasicCredentials(username="admin", password="wrongpassword")
 
     with patch(
         "app.infrastructure.adapters.inbound.http.auth.get_settings",
@@ -56,14 +56,14 @@ def test_require_api_token_raises_401_if_credentials_invalid() -> None:
 
 def test_require_api_token_success_with_valid_credentials() -> None:
     mock_settings = MagicMock()
-    mock_settings.api_username = "auxis"
-    mock_settings.api_password = "AuxisPassword123!"
+    mock_settings.api_username = "admin"
+    mock_settings.api_password = "AdminPassword123!"
 
-    credentials = HTTPBasicCredentials(username="auxis", password="AuxisPassword123!")
+    credentials = HTTPBasicCredentials(username="admin", password="AdminPassword123!")
 
     with patch(
         "app.infrastructure.adapters.inbound.http.auth.get_settings",
         return_value=mock_settings,
     ):
         res = require_api_token(credentials=credentials)
-        assert res == "auxis"
+        assert res == "admin"

@@ -74,21 +74,21 @@ def test_coerce_types(settings: Settings) -> None:
     extractor = LlmAiExtractor(settings)
 
     raw_dict = {
-        "total_gross_income": "100000.50",
-        "income_tax_withheld": "5000",
-        "tax_year": "2024",
-        "extras": {
-            "salary_payments": "80000",
-            "social_benefits": "invalid-float",
-        },
+        "total_amount": "100000.50",
+        "tax_amount": "5000",
+        "tables": [
+            {"description": "Item 1", "qty": "2", "unit_price": "50.5", "total": "101"}
+        ],
+        "extras": {"custom_metadata": "some info"},
     }
 
     coerced = extractor._coerce_types(raw_dict)
-    assert coerced["total_gross_income"] == 100000.50
-    assert coerced["income_tax_withheld"] == 5000.0
-    assert coerced["tax_year"] == 2024
-    assert coerced["extras"]["salary_payments"] == 80000.0
-    assert coerced["extras"]["social_benefits"] is None
+    assert coerced["total_amount"] == 100000.50
+    assert coerced["tax_amount"] == 5000.0
+    assert coerced["tables"][0]["qty"] == 2.0
+    assert coerced["tables"][0]["unit_price"] == 50.5
+    assert coerced["tables"][0]["total"] == 101.0
+    assert coerced["extras"]["custom_metadata"] == "some info"
 
 
 @pytest.mark.anyio
@@ -98,9 +98,7 @@ async def test_extract_metadata_success(settings: Settings) -> None:
     # Mock LLM and response
     mock_llm = AsyncMock()
     mock_response = MagicMock()
-    mock_response.content = (
-        '{"employee_name": "John Doe", "total_gross_income": 50000.0}'
-    )
+    mock_response.content = '{"vendor_name": "Initech Corp", "total_amount": 50000.0}'
     mock_llm.ainvoke.return_value = mock_response
 
     with patch.object(extractor, "_get_llm", return_value=mock_llm):
@@ -108,8 +106,8 @@ async def test_extract_metadata_success(settings: Settings) -> None:
             text="Sample raw text", image_bytes=b"png-bytes", filename="test.pdf"
         )
 
-        assert result["employee_name"] == "John Doe"
-        assert result["total_gross_income"] == 50000.0
+        assert result["vendor_name"] == "Initech Corp"
+        assert result["total_amount"] == 50000.0
         mock_llm.ainvoke.assert_called_once()
 
 

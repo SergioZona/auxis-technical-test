@@ -22,7 +22,7 @@ _env_file = f"src/env/{_app_env.upper()}.env" if _app_env else "src/env/.env"
 class Settings(BaseSettings):
     # ── Config (from .env file — safe to version control) ──────────────────
     app_env: str = "dev"
-    app_name: str = "auxis-technical-test"
+    app_name: str = "invoice-hybrid-rag"
     app_version: str = "1.0.0"
     api_version: str = "v1"
     debug: bool = False
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="")
     gemini_api_key: str = Field(default="")
 
-    api_username: str = Field(default="auxis")
+    api_username: str = Field(default="admin")
     api_password: str = Field(default="")
 
     @field_validator("api_password", mode="before")
