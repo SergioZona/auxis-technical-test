@@ -32,10 +32,10 @@ WORKDIR /app
 # Non-root user for security
 RUN useradd --create-home --shell /bin/bash appuser
 
-# Copy installed packages and app from builder
-COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
-COPY --from=builder --chown=appuser:appuser /app/src /app/src
-COPY --from=builder --chown=appuser:appuser /app/ui /app/ui
+# Copy installed packages and app from builder (read-only for security)
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/src /app/src
+COPY --from=builder /app/ui /app/ui
 
 # Create data directory and ensure ownership
 RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
