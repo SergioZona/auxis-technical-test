@@ -200,8 +200,6 @@ class LangChainRagAdapter(LangChainRagPort):
             {"input": question}, config={"callbacks": callbacks}
         )
 
-
-
         sources = self._extract_sources(response.get("intermediate_steps", []))
         ans = self._clean_output(response.get("output", ""))
 

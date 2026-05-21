@@ -67,4 +67,3 @@ def test_require_api_token_success_with_valid_credentials() -> None:
     ):
         res = require_api_token(credentials=credentials)
         assert res == "auxis"
-
