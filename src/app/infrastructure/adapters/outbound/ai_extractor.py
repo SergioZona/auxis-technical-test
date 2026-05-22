@@ -142,24 +142,29 @@ class LlmAiExtractor(AiExtractorPort):
         except ValueError, TypeError:
             return None
 
+    def _coerce_table_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        coerced = {**row}
+        for k in ["qty", "unit_price", "total"]:
+            if k in coerced:
+                coerced[k] = self._coerce_float(coerced[k])
+        return coerced
+
+    def _coerce_tables(self, tables: Any) -> list[dict[str, Any]]:
+        if not isinstance(tables, list):
+            return []
+        coerced = []
+        for row in tables:
+            if isinstance(row, dict):
+                coerced.append(self._coerce_table_row(row))
+        return coerced
+
     def _coerce_types(self, result: dict[str, Any]) -> dict[str, Any]:
         """Ensure numeric fields are correct Python types, not strings."""
         for f in ["total_amount", "tax_amount"]:
             if f in result:
                 result[f] = self._coerce_float(result[f])
 
-        if "tables" in result and isinstance(result["tables"], list):
-            coerced_tables = []
-            for row in result["tables"]:
-                if isinstance(row, dict):
-                    coerced_row = {**row}
-                    for k in ["qty", "unit_price", "total"]:
-                        if k in coerced_row:
-                            coerced_row[k] = self._coerce_float(coerced_row[k])
-                    coerced_tables.append(coerced_row)
-            result["tables"] = coerced_tables
-        else:
-            result["tables"] = []
+        result["tables"] = self._coerce_tables(result.get("tables"))
 
         if "extras" not in result or not isinstance(result["extras"], dict):
             result["extras"] = {}

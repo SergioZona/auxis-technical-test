@@ -270,6 +270,26 @@ class PyMuPDFDocumentParser(DocumentParserPort):
             extras = ai_result.get("extras") or {}
         return reconciled, extras
 
+    def _reconcile_page_canonical(
+        self, ai_val: dict[str, Any], reconciled: dict[str, Any]
+    ) -> None:
+        if reconciled["tables"] is None:
+            reconciled["tables"] = []
+        tables_list = ai_val.get("tables")
+        if isinstance(tables_list, list):
+            reconciled["tables"].extend(tables_list)
+
+        for k in reconciled:
+            if k != "tables" and reconciled[k] is None and k in ai_val:
+                reconciled[k] = ai_val[k]
+
+    def _reconcile_page_extras(
+        self, page_extras: dict[str, Any], extras: dict[str, Any]
+    ) -> None:
+        for k, v in page_extras.items():
+            if v is not None and extras.get(k) is None:
+                extras[k] = v
+
     def _reconcile_step_ai_pages(
         self,
         pages: list[dict[str, Any]],
@@ -278,20 +298,8 @@ class PyMuPDFDocumentParser(DocumentParserPort):
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         for p in pages:
             ai_val = p.get("ai_data") or {}
-            for k in reconciled:
-                if k == "tables":
-                    if reconciled["tables"] is None:
-                        reconciled["tables"] = []
-                    if "tables" in ai_val and isinstance(ai_val["tables"], list):
-                        reconciled["tables"].extend(ai_val["tables"])
-                else:
-                    if reconciled[k] is None and k in ai_val:
-                        reconciled[k] = ai_val[k]
-
-            page_extras = ai_val.get("extras") or {}
-            for k, v in page_extras.items():
-                if v is not None and extras.get(k) is None:
-                    extras[k] = v
+            self._reconcile_page_canonical(ai_val, reconciled)
+            self._reconcile_page_extras(ai_val.get("extras") or {}, extras)
         return reconciled, extras
 
     async def _reconcile_metadata_node(self, state: ParserState) -> dict[str, Any]:

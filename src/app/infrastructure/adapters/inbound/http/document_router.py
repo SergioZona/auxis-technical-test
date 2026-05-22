@@ -219,6 +219,32 @@ async def get_document_pdf(
     )
 
 
+def _apply_document_updates(doc: Any, updates: dict[str, Any]) -> None:
+    canonical = {
+        "document_type",
+        "doc_date",
+        "doc_number",
+        "vendor_name",
+        "client_name",
+        "total_amount",
+        "tax_amount",
+        "tables",
+    }
+    for field in canonical:
+        if field in updates:
+            setattr(doc, field, updates[field])
+
+    if not doc.extras:
+        doc.extras = {}
+
+    if "extras" in updates and isinstance(updates["extras"], dict):
+        doc.extras.update(updates["extras"])
+
+    for key, val in updates.items():
+        if key not in canonical and key != "extras":
+            doc.extras[key] = val
+
+
 @router.patch(
     "/documents/{document_id}",
     responses={
@@ -242,47 +268,7 @@ async def update_document(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Apply updates
-    if "document_type" in updates:
-        doc.document_type = updates["document_type"]
-    if "doc_date" in updates:
-        doc.doc_date = updates["doc_date"]
-    if "doc_number" in updates:
-        doc.doc_number = updates["doc_number"]
-    if "vendor_name" in updates:
-        doc.vendor_name = updates["vendor_name"]
-    if "client_name" in updates:
-        doc.client_name = updates["client_name"]
-    if "total_amount" in updates:
-        doc.total_amount = updates["total_amount"]
-    if "tax_amount" in updates:
-        doc.tax_amount = updates["tax_amount"]
-    if "tables" in updates:
-        doc.tables = updates["tables"]
-
-    # Update extras dynamically
-    if "extras" in updates and isinstance(updates["extras"], dict):
-        if not doc.extras:
-            doc.extras = {}
-        for key, val in updates["extras"].items():
-            doc.extras[key] = val
-
-    # Also allow direct root updates for extra fields not in canonical
-    for key, val in updates.items():
-        if key not in {
-            "document_type",
-            "doc_date",
-            "doc_number",
-            "vendor_name",
-            "client_name",
-            "total_amount",
-            "tax_amount",
-            "tables",
-            "extras",
-        }:
-            if not doc.extras:
-                doc.extras = {}
-            doc.extras[key] = val
+    _apply_document_updates(doc, updates)
 
     await repository.update(doc)
     return success({"message": "Document updated successfully"})
